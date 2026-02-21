@@ -1,4 +1,4 @@
-"""
+""" 
 ScannerAgent — Agent de diagnostic initial (Phase 1 du scan).
 
 C'est l'agent qui tourne AVANT la session consulting.
