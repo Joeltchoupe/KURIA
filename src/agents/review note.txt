@@ -1,0 +1,12 @@
+[✓] BaseAgent.run() est un template method — le cycle est garanti
+[✓] InsufficientDataError ne tue pas le run — il dégrade gracefully
+[✓] Les probabilités de deal sont bornées [0.02, 0.95] — pas de 0% ni 100%
+[✓] Le forecast utilise le correction_factor de l'Adaptateur
+[✓] Le bottleneck detector retourne UN SEUL goulot (Goldratt)
+[✓] Les alertes cash sont triées rouge > jaune
+[✓] L'agent Acquisition a un mode observation quand pas assez de données
+[✓] Les sources sont normalisées (google_ads, linkedin_ads, referral...)
+[✓] Le lead scoring utilise des poids validés (somme = 1.0 via ScoreWeights)
+[✓] safe_divide() partout — zéro ZeroDivisionError possible
+[✓] format_currency() pour les montants dans les events et logs
+[✓] Aucun agent n'accède directement à un connecteur — données pré-normalisées
