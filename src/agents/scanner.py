@@ -1,4 +1,4 @@
-""" 
+"""
 ScannerAgent — Agent de diagnostic initial (Phase 1 du scan).
 
 C'est l'agent qui tourne AVANT la session consulting.
@@ -248,6 +248,7 @@ class ScannerAgent(BaseAgent):
                 score += 10
 
         return round(score / max_score, 2) if max_score > 0 else 0.0
+
 
     # ──────────────────────────────────────────
     # SALES ANALYSIS
@@ -589,4 +590,426 @@ class ScannerAgent(BaseAgent):
             summary = email_data.get("summary", {})
             response_avg = summary.get("avg_response_time_hours", 0)
 
-            # Estimer interne vs externe (simplifi
+            # Estimer interne vs externe (simplifié)
+            internal_pct = summary.get("internal_pct", 0.5)
+            response_internal = response_avg * 0.6 if internal_pct > 0.3 else None
+            response_external = response_avg
+
+            after_hours_pct = summary.get("after_hours_pct")
+
+            # Détecter les key dependencies via email
+            busiest = summary.get("busiest_recipients", [])
+            total_msgs = summary.get("total_messages", 1)
+            for person in busiest[:5]:
+                pct = person.get("count", 0) / max(total_msgs, 1)
+                if pct > 0.15:
+                    key_dependencies.append(PersonDependency(
+                        name=person.get("email", "Unknown"),
+                        involvement_pct=round(pct, 3),
+                    ))
+
+            # Anomalies email
+            if response_avg > 48:
+                anomalies.append(Anomaly(
+                    type=AnomalyType.PATTERN,
+                    department="ops",
+                    title=f"Temps de réponse email critique : {response_avg:.0f}h",
+                    description=(
+                        f"Le temps de réponse moyen est de {response_avg:.1f} heures. "
+                        f"Au-dessus de 24h, la réactivité perçue chute drastiquement."
+                    ),
+                    evidence=f"Basé sur {summary.get('total_threads', 0)} threads analysés.",
+                    severity=min(1.0, response_avg / 96),
+                    estimated_annual_cost=None,
+                    cost_confidence=None,
+                ))
+
+            if after_hours_pct and after_hours_pct > 0.30:
+                anomalies.append(Anomaly(
+                    type=AnomalyType.PATTERN,
+                    department="ops",
+                    title=f"{after_hours_pct:.0%} d'activité hors heures",
+                    description=(
+                        f"{after_hours_pct:.0%} de l'activité email se déroule "
+                        f"en dehors des heures de bureau. Risque de burnout."
+                    ),
+                    evidence="Basé sur les timestamps des emails.",
+                    severity=0.6,
+                ))
+
+        # Process documentation score (heuristique)
+        deals = crm_data.get("deals", [])
+        deals_with_next = sum(1 for d in deals if d.get("has_next_step"))
+        if deals:
+            next_step_ratio = deals_with_next / len(deals)
+            if next_step_ratio > 0.7:
+                doc_score = "high"
+            elif next_step_ratio > 0.4:
+                doc_score = "medium"
+            else:
+                doc_score = "low"
+
+        return OperationsAnalysis(
+            email_response_internal_avg_hours=(
+                round(response_internal, 1) if response_internal else None
+            ),
+            email_response_external_avg_hours=(
+                round(response_external, 1) if response_external else None
+            ),
+            after_hours_activity_pct=(
+                round(after_hours_pct, 3) if after_hours_pct else None
+            ),
+            tasks_overdue=tasks_overdue,
+            tasks_unassigned=tasks_unassigned,
+            process_documentation_score=doc_score,
+            key_person_dependencies=key_dependencies,
+            anomalies=anomalies,
+        )
+
+    # ──────────────────────────────────────────
+    # FINANCE ANALYSIS
+    # ──────────────────────────────────────────
+
+    async def _analyze_finance(
+        self,
+        finance_data: Optional[dict[str, Any]],
+        company_info: dict[str, Any],
+    ) -> FinanceAnalysis:
+        """Analyse financière basée sur les données comptables."""
+        anomalies = []
+
+        if not finance_data:
+            # Mode dégradé : estimation basée sur le CA déclaré
+            annual_revenue = company_info.get("annual_revenue", 0)
+            estimated_burn = annual_revenue / 12 * 0.9  # 90% du revenu
+
+            return FinanceAnalysis(
+                cash_position=0,
+                monthly_burn=round(estimated_burn, 2),
+                runway_months=99.0,
+                avg_client_payment_days=45.0,
+                avg_supplier_payment_days=30.0,
+                cash_gap_days=15.0,
+                invoices_overdue_count=0,
+                invoices_overdue_value=0,
+                revenue_recurring_pct=0.0,
+                anomalies=[Anomaly(
+                    type=AnomalyType.GAP,
+                    department="finance",
+                    title="Aucune donnée financière connectée",
+                    description="Analyse basée sur des estimations. Connecter QuickBooks pour des données réelles.",
+                    evidence="Aucun outil finance connecté.",
+                    severity=0.5,
+                )],
+            )
+
+        summary = finance_data.get("summary", {})
+
+        cash_position = summary.get("cash_position", 0)
+        monthly_burn = summary.get("monthly_burn_rate", 0)
+        monthly_revenue = summary.get("monthly_revenue_avg", 0)
+
+        # Runway
+        net_monthly = monthly_revenue - monthly_burn
+        runway = 99.0
+        if net_monthly < 0 and monthly_burn > 0:
+            runway = abs(cash_position / net_monthly) if net_monthly != 0 else 0
+
+        avg_client_days = summary.get("avg_client_payment_days", 0)
+        avg_supplier_days = summary.get("avg_supplier_payment_days", 0)
+        cash_gap = avg_client_days - avg_supplier_days
+
+        overdue_count = summary.get("invoices_overdue_count", 0)
+        overdue_value = summary.get("invoices_overdue_value", 0)
+        recurring_pct = summary.get("revenue_recurring_pct", 0)
+
+        # Top expenses
+        top_exp_raw = summary.get("top_expenses", [])
+        top_expenses = []
+        for exp in top_exp_raw[:10]:
+            top_expenses.append(TopExpense(
+                category=exp.get("category", "unknown"),
+                monthly_amount=exp.get("monthly_avg", 0),
+                annual_amount=exp.get("total", 0),
+                pct_of_total=exp.get("pct_of_total", 0),
+            ))
+
+        # Anomalies finance
+        if runway < 3.0:
+            anomalies.append(Anomaly(
+                type=AnomalyType.PATTERN,
+                department="finance",
+                title=f"Runway critique : {runway:.1f} mois",
+                description=f"Au rythme actuel, la trésorerie tient {runway:.1f} mois.",
+                evidence=f"Cash: {cash_position:,.0f}€, Burn net: {abs(net_monthly):,.0f}€/mois.",
+                severity=0.95,
+                estimated_annual_cost=None,
+            ))
+
+        if cash_gap > 20:
+            gap_cost = abs(cash_gap) * (monthly_burn / 30) * 0.08
+            anomalies.append(Anomaly(
+                type=AnomalyType.PATTERN,
+                department="finance",
+                title=f"Gap de trésorerie : {cash_gap:.0f} jours",
+                description=(
+                    f"Les clients paient en {avg_client_days:.0f} jours, "
+                    f"les fournisseurs sont payés en {avg_supplier_days:.0f} jours. "
+                    f"Gap de {cash_gap:.0f} jours."
+                ),
+                evidence="Basé sur les délais de paiement des 90 derniers jours.",
+                severity=min(1.0, cash_gap / 60),
+                estimated_annual_cost=round(gap_cost, 0),
+                cost_confidence=0.4,
+            ))
+
+        if overdue_value > 0:
+            anomalies.append(Anomaly(
+                type=AnomalyType.STAGNATION,
+                department="finance",
+                title=f"{overdue_count} factures en retard ({self.format_currency(overdue_value)})",
+                description=f"{overdue_count} factures pour un total de {overdue_value:,.0f}€ sont en retard de paiement.",
+                evidence="Basé sur les factures avec échéance dépassée.",
+                severity=min(1.0, overdue_value / 100_000),
+                estimated_annual_cost=round(overdue_value * 0.1, 0),
+                cost_confid
+
+
+
+    # ──────────────────────────────────────────
+    # CLARITY SCORE CALCULATION
+    # ──────────────────────────────────────────
+
+    def _calculate_clarity_score(
+        self,
+        sales: SalesAnalysis,
+        operations: OperationsAnalysis,
+        finance: FinanceAnalysis,
+        marketing: MarketingAnalysis,
+        tools_connected: list[str],
+    ) -> ClarityScore:
+        """Calcule le Score de Clarté™.
+
+        FORMULE EXPLICITE, REPRODUCTIBLE, AUDITABLE.
+        Pas d'estimation LLM. Du calcul pur.
+        """
+        # ── Machine Readability ──
+        mr_scores = []
+
+        # 1. Data completeness (30%)
+        completeness = 0
+        if sales.deals_active > 20:
+            completeness += 30
+        elif sales.deals_active > 5:
+            completeness += 15
+        if finance.cash_position != 0:
+            completeness += 25
+        if operations.email_response_external_avg_hours is not None:
+            completeness += 25
+        if marketing.has_source_tracking:
+            completeness += 20
+        mr_scores.append(("completeness", min(100, completeness), self.MR_WEIGHT_DATA_COMPLETENESS))
+
+        # 2. Data freshness (25%)
+        freshness = 70  # Base score, réduit si données stale
+        if sales.stagnation_rate > 0.5:
+            freshness -= 30
+        if finance.invoices_overdue_count > 10:
+            freshness -= 15
+        mr_scores.append(("freshness", max(0, freshness), self.MR_WEIGHT_DATA_FRESHNESS))
+
+        # 3. Data structure (25%)
+        structure = 0
+        if sales.forecast_confidence > 0.5:
+            structure += 30
+        if sales.concentration_risk != "high":
+            structure += 20
+        if operations.process_documentation_score in ("high", "medium"):
+            structure += 30
+        if marketing.leads_with_source_pct > 0.5:
+            structure += 20
+        mr_scores.append(("structure", min(100, structure), self.MR_WEIGHT_DATA_STRUCTURE))
+
+        # 4. Tool coverage (20%)
+        tool_score = len(tools_connected) / 4 * 100  # 4 tools max en V1
+        mr_scores.append(("tools", min(100, tool_score), self.MR_WEIGHT_TOOL_COVERAGE))
+
+        machine_readability = sum(score * weight for _, score, weight in mr_scores)
+
+        # ── Structural Compatibility ──
+        sc_scores = []
+
+        # 1. Process explicitness (30%)
+        process_score = {"high": 80, "medium": 50, "low": 20, "unknown": 10}
+        sc_scores.append((
+            "process",
+            process_score.get(operations.process_documentation_score, 10),
+            self.SC_WEIGHT_PROCESS_EXPLICITNESS,
+        ))
+
+        # 2. Role clarity (25%)
+        role_clarity = 70
+        if sales.concentration_risk == "high":
+            role_clarity = 25
+        elif sales.concentration_risk == "medium":
+            role_clarity = 50
+        sc_scores.append(("roles", role_clarity, self.SC_WEIGHT_ROLE_CLARITY))
+
+        # 3. Data centralization (25%)
+        centralization = len(tools_connected) / 4 * 100
+        sc_scores.append(("central", min(100, centralization), self.SC_WEIGHT_DATA_CENTRALIZATION))
+
+        # 4. Decision traceability (20%)
+        traceability = 30  # Base faible, amélioré si next steps présents
+        if sales.deals_without_next_step < sales.deals_active * 0.3:
+            traceability = 70
+        sc_scores.append(("trace", traceability, self.SC_WEIGHT_DECISION_TRACEABILITY))
+
+        structural_compatibility = sum(
+            score * weight for _, score, weight in sc_scores
+        )
+
+        # ── Overall ──
+        overall = ClarityScore.calculate_overall(
+            machine_readability, structural_compatibility
+        )
+
+        # ── Department scores ──
+        dept_sales = min(100, (
+            (30 if sales.forecast_confidence > 0.5 else 10) +
+            (25 if sales.stagnation_rate < 0.3 else 5) +
+            (25 if sales.concentration_risk != "high" else 5) +
+            (20 if sales.deals_without_next_step < sales.deals_active * 0.3 else 5)
+        ))
+        dept_ops = min(100, (
+            (40 if operations.process_documentation_score == "high" else
+             25 if operations.process_documentation_score == "medium" else 10) +
+            (30 if operations.after_hours_activity_pct is None or
+             operations.after_hours_activity_pct < 0.2 else 10) +
+            (30 if not operations.key_person_dependencies or
+             all(p.involvement_pct < 0.3 for p in operations.key_person_dependencies) else 10)
+        ))
+        dept_finance = min(100, (
+            (30 if finance.runway_months > 6 else 10) +
+            (25 if finance.cash_gap_days < 15 else 5) +
+            (25 if finance.invoices_overdue_count < 3 else 5) +
+            (20 if finance.revenue_recurring_pct > 0.5 else 5)
+        ))
+        dept_marketing = min(100, (
+            (40 if marketing.has_source_tracking else 5) +
+            (30 if marketing.leads_with_source_pct > 0.7 else
+             15 if marketing.leads_with_source_pct > 0.3 else 5) +
+            (30 if marketing.lead_to_client_conversion and
+             marketing.lead_to_client_conversion > 0.1 else 10)
+        ))
+
+        return ClarityScore(
+            machine_readability=round(machine_readability, 1),
+            structural_compatibility=round(structural_compatibility, 1),
+            overall=overall,
+            by_department=DepartmentScores(
+                sales=round(dept_sales, 1),
+                ops=round(dept_ops, 1),
+                finance=round(dept_finance, 1),
+                marketing=round(dept_marketing, 1),
+            ),
+            confidence=self._calculate_confidence(
+                {"crm": {"deals": [], "contacts": []}, "email": None, "finance": None},
+                {},
+            ),
+            data_sources_used=len(tools_connected),
+        )
+
+    # ──────────────────────────────────────────
+    # FRICTION IDENTIFICATION
+    # ──────────────────────────────────────────
+
+    async def _identify_frictions(
+        self,
+        sales: SalesAnalysis,
+        operations: OperationsAnalysis,
+        finance: FinanceAnalysis,
+        marketing: MarketingAnalysis,
+        company_info: dict[str, Any],
+    ) -> list[Friction]:
+        """Identifie et chiffre les frictions à partir des anomalies."""
+        frictions = []
+        friction_id = 0
+        employee_count = company_info.get("employee_count", 30)
+        hourly_rate = company_info.get("annual_revenue", 3_000_000) / employee_count / 1800
+
+        all_analyses = [
+            ("sales", sales),
+            ("ops", operations),
+            ("finance", finance),
+            ("marketing", marketing),
+        ]
+
+        for dept, analysis in all_analyses:
+            for anomaly in analysis.anomalies:
+                friction_id += 1
+
+                # Estimer le coût si pas déjà fait
+                cost = anomaly.estimated_annual_cost or 0
+                if cost == 0 and anomaly.severity > 0.5:
+                    cost = anomaly.severity * employee_count * hourly_rate * 40
+                cost_confidence = anomaly.cost_confidence or 0.3
+
+                # Classifier impact et difficulté
+                impact = anomaly.severity * 10
+                difficulty = self._estimate_difficulty(anomaly, dept)
+
+                priority = Friction.classify_priority(impact, difficulty)
+                severity = Friction.classify_severity(cost)
+
+                agent_map = {
+                    "sales": "revenue_velocity",
+                    "ops": "process_clarity",
+                    "finance": "cash_predictability",
+                    "marketing": "acquisition_efficiency",
+                }
+
+                frictions.append(Friction(
+                    friction_id=f"F{friction_id}",
+                    department=dept,
+                    title=anomaly.title,
+                    description=anomaly.description,
+                    estimated_annual_cost=round(cost, 0),
+                    cost_confidence=cost_confidence,
+                    evidence=anomaly.evidence,
+                    severity=severity,
+                    impact_score=round(impact, 1),
+                    difficulty_score=round(difficulty, 1),
+                    priority=priority,
+                    agent_recommended=agent_map.get(dept),
+                ))
+
+        # Trier par coût décroissant
+        frictions.sort(key=lambda f: f.estimated_annual_cost, reverse=True)
+        return frictions
+
+    @staticmethod
+    def _estimate_difficulty(anomaly: Anomaly, department: str) -> float:
+        """Estime la difficulté de résolution d'une anomalie."""
+        difficulty = 5.0  # Base
+
+        if anomaly.type == AnomalyType.GAP:
+            difficulty = 3.0  # Manque de données = connecter un outil
+        elif anomaly.type == AnomalyType.CONCENTRATION:
+            difficulty = 7.0  # Changer la dépendance = organisationnel
+        elif anomaly.type == AnomalyType.STAGNATION:
+            difficulty = 3.0  # Relancer = action directe
+        elif anomaly.type == AnomalyType.INCONSISTENCY:
+            difficulty = 4.0  # Nettoyer les données
+        elif anomaly.type == AnomalyType.PATTERN:
+            difficulty = 6.0  # Changer un comportement
+
+        return difficulty
+
+
+
+
+
+
+
+
