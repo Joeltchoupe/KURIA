@@ -125,7 +125,8 @@ class QuickBooksConnector(BaseConnector):
     Authentification : OAuth2 Bearer token.
     Base URL dépend de l'environnement (sandbox vs production).
     """
-
+    CONNECTOR_CATEGORY = "finance"
+    DATA_TYPES = ["accounts", "invoices", "bills", "summary"]
     CONNECTOR_NAME = "quickbooks"
     BASE_URL_PROD = "https://quickbooks.api.intuit.com"
     BASE_URL_SANDBOX = "https://sandbox-quickbooks.api.intuit.com"
