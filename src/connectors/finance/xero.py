@@ -294,3 +294,126 @@ class XeroConnector(BaseConnector):
                 currency=bill.get("CurrencyCode", "EUR"),
             ))
         return bills
+
+    # ── Summary ──
+
+    def _calculate_summary(
+        self,
+        accounts: list[NormalizedAccount],
+        invoices: list[NormalizedInvoice],
+        bills: list[NormalizedBill],
+        days_back: int,
+    ) -> dict[str, Any]:
+        """Calcul identique à QuickBooks — même format de sortie."""
+        cash_position = sum(a.balance or 0 for a in accounts)
+
+        total_receivable = sum(i.amount_due or 0 for i in invoices if i.status != "paid")
+        total_payable = sum(b.amount_due or 0 for b in bills if b.status != "paid")
+
+        overdue_invoices = [i for i in invoices if i.is_overdue]
+        invoices_overdue_count = len(overdue_invoices)
+        invoices_overdue_value = sum(i.amount_due or 0 for i in overdue_invoices)
+
+        payment_days = [
+            i.days_to_payment for i in invoices
+            if i.days_to_payment is not None and i.days_to_payment > 0
+        ]
+        avg_client_payment_days = 0.0
+        if payment_days:
+            avg_client_payment_days = sum(payment_days) / len(payment_days)
+
+        supplier_days = []
+        for b in bills:
+            if b.status == "paid" and b.issue_date and b.due_date:
+                delta = (b.due_date - b.issue_date).days
+                if 0 < delta < 365:
+                    supplier_days.append(delta)
+        avg_supplier_payment_days = 0.0
+        if supplier_days:
+            avg_supplier_payment_days = sum(supplier_days) / len(supplier_days)
+
+        months = max(1, days_back / 30)
+        total_expenses = sum(b.amount or 0 for b in bills)
+        total_revenue = sum(i.amount or 0 for i in invoices)
+        monthly_burn = total_expenses / months
+        monthly_revenue = total_revenue / months
+
+        runway_months = 0.0
+        net_monthly = monthly_revenue - monthly_burn
+        if monthly_burn > 0 and net_monthly < 0:
+            runway_months = cash_position / abs(net_monthly)
+        elif net_monthly >= 0:
+            runway_months = 99.0
+
+        # Recurring revenue
+        from collections import Counter
+        invoice_patterns = Counter()
+        for inv in invoices:
+            key = (inv.customer_name, round(inv.amount or 0, -1))
+            invoice_patterns[key] += 1
+
+        recurring_revenue = sum(
+            (inv.amount or 0)
+            for inv in invoices
+            if invoice_patterns[(inv.customer_name, round(inv.amount or 0, -1))] >= 2
+        )
+        revenue_recurring_pct = 0.0
+        if total_revenue > 0:
+            revenue_recurring_pct = recurring_revenue / total_revenue
+
+        # Top expenses
+        expense_by_category: dict[str, float] = {}
+        for b in bills:
+            cat = b.category or "uncategorized"
+            expense_by_category[cat] = expense_by_category.get(cat, 0) + (b.amount or 0)
+
+        top_expenses = sorted(
+            expense_by_category.items(), key=lambda x: x[1], reverse=True
+        )[:10]
+
+        return {
+            "cash_position": round(cash_position, 2),
+            "total_receivable": round(total_receivable, 2),
+            "total_payable": round(total_payable, 2),
+            "invoices_overdue_count": invoices_overdue_count,
+            "invoices_overdue_value": round(invoices_overdue_value, 2),
+            "avg_client_payment_days": round(avg_client_payment_days, 1),
+            "avg_supplier_payment_days": round(avg_supplier_payment_days, 1),
+            "monthly_burn_rate": round(monthly_burn, 2),
+            "monthly_revenue_avg": round(monthly_revenue, 2),
+            "revenue_recurring_pct": round(revenue_recurring_pct, 3),
+            "runway_months": round(min(runway_months, 99.0), 1),
+            "top_expenses": [
+                {
+                    "category": cat,
+                    "total": round(amount, 2),
+                    "monthly_avg": round(amount / months, 2),
+                    "pct_of_total": round(amount / total_expenses, 3) if total_expenses > 0 else 0,
+                }
+                for cat, amount in top_expenses
+            ],
+        }
+
+    # ── Helpers ──
+
+    @staticmethod
+    def _parse_xero_date(date_str: Optional[str]) -> Optional[datetime]:
+        """Xero renvoie les dates au format '/Date(1234567890000+0000)/'."""
+        if not date_str:
+            return None
+
+        # Format standard ISO
+        parsed = normalize_date(date_str)
+        if parsed:
+            return parsed
+
+        # Format Xero legacy: /Date(ms+offset)/
+        if "/Date(" in str(date_str):
+            try:
+                ms_str = str(date_str).split("(")[1].split("+")[0].split("-")[0].split(")")[0]
+                ms = int(ms_str)
+                return datetime.fromtimestamp(ms / 1000, tz=timezone.utc)
+            except (IndexError, ValueError):
+                return None
+
+        return None
