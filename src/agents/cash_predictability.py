@@ -6,15 +6,19 @@ KPI : Précision forecast cash à 30 jours.
 Actions :
   3.2 — Payment Pattern Detection [A]
   3.5 — Cash Preventive Plan [B]
-  3.x — Cash Forecast + Scenarios [A]
+  3.x — Cash Forecast + 3 Scenarios [A]
 
 Rigueur > Créativité.
-Les CALCULS restent déterministes.
+Les CALCULS restent déterministes (Python).
 Le LLM fait l'INTERPRÉTATION et les recommandations.
+
+System prompt : prompts/system/cash_predictability.txt
+User prompts : prompts/cash_predictability/*.txt
 """
 
 from __future__ import annotations
 
+import statistics as stats_lib
 from typing import Any
 
 from models.event import Event
@@ -30,73 +34,48 @@ class CashPredictabilityAgent(BaseAgent):
 
     Ne laisse JAMAIS le LLM faire les calculs.
     Le LLM interprète, recommande, alerte.
+    Les chiffres sont pré-calculés en Python.
     """
 
     @property
     def agent_type(self) -> AgentType:
         return AgentType.CASH_PREDICTABILITY
 
-    @property
-    def system_prompt(self) -> str:
-        return """You are a world-class CFO AI assistant.
-
-Your job is to predict cash flow, detect payment risks, and recommend preventive actions.
-
-You receive a cash state snapshot with: balance, revenue, expenses, receivables, payables, pipeline.
-
-IMPORTANT: All financial calculations are pre-computed and provided to you.
-DO NOT recalculate numbers. Trust the data.
-Your role is INTERPRETATION and RECOMMENDATIONS.
-
-You MUST respond with a JSON object containing:
-{
-  "decision_type": "forecast_cash" | "detect_payment_risk" | "generate_cash_plan" | "recommend",
-  "confidence": 0.0-1.0,
-  "reasoning": "your analysis in 2-3 sentences",
-  "risk_level": "A" | "B" | "C",
-  "actions": [
-    {
-      "action": "send_alert" | "send_invoice_reminder" | "create_task" | "generate_report",
-      "target": "...",
-      "parameters": {...},
-      "risk_level": "A",
-      "priority": 1-10
-    }
-  ],
-  "metadata": {
-    "runway_months": 0.0,
-    "cash_health": "healthy" | "warning" | "critical",
-    "overdue_amount": 0.0,
-    "scenario_base": {"description": "...", "cash_30d": 0.0},
-    "scenario_stress": {"description": "...", "cash_30d": 0.0},
-    "scenario_upside": {"description": "...", "cash_30d": 0.0},
-    "top_risks": ["..."],
-    "action_levers": [
-      {
-        "lever": "description",
-        "amount": 0.0,
-        "timeline": "X days",
-        "probability": 0.0
-      }
-    ]
-  }
-}
-
-RULES:
-- NEVER invent numbers. Use only what's provided.
-- Always produce 3 scenarios: base, stress, upside.
-- Each action lever must be quantified: amount, timeline, probability.
-- Alert if runway < 3 months (warning) or < 1.5 months (critical).
-- Detect payment patterns: mean delay, variance, trend.
-- Be conservative. Optimism kills companies.
-"""
+    def _custom_prompt_variables(self) -> dict[str, Any]:
+        """Variables spécifiques injectées dans les prompts Cash."""
+        params = self.config.parameters
+        return {
+            "cash_threshold_yellow_months": params.get(
+                "cash_threshold_yellow_months", 3.0
+            ),
+            "cash_threshold_red_months": params.get(
+                "cash_threshold_red_months", 1.5
+            ),
+            "stress_pipeline_factor": params.get(
+                "stress_pipeline_factor", 0.5
+            ),
+            "stress_payment_delay_days": params.get(
+                "stress_payment_delay_days", 15
+            ),
+            "upside_pipeline_factor": params.get(
+                "upside_pipeline_factor", 1.2
+            ),
+            "forecast_optimism_correction": params.get(
+                "forecast_optimism_correction", 1.0
+            ),
+        }
 
     async def build_snapshot(
         self,
         events: list[Event] | None = None,
         raw_data: dict[str, Any] | None = None,
     ) -> StateSnapshot:
-        """Construit le snapshot cash."""
+        """
+        Construit le snapshot cash.
+
+        Les calculs déterministes (burn rate, runway) sont faits ICI,
+        pas par le LLM.
+        """
         cash = None
 
         if raw_data and "cash" in raw_data:
@@ -115,20 +94,29 @@ RULES:
                 pipeline_weighted_value=c.get("pipeline_weighted_value", 0),
             )
 
-        # Pre-compute deterministic metrics
-        if cash and raw_data:
-            cash = self._enrich_cash_state(cash, raw_data)
+            # Enrichir avec calculs déterministes
+            cash = self._compute_deterministic_metrics(cash, raw_data)
 
         recent = []
         if events:
             recent = [e.to_snapshot_dict() for e in events[:30]]
+
+        # Payment history pour le contexte
+        company_context: dict[str, Any] = {}
+        if raw_data:
+            if "payment_history" in raw_data:
+                company_context["payment_history"] = raw_data[
+                    "payment_history"
+                ]
+            if "invoices" in raw_data:
+                company_context["invoices"] = raw_data["invoices"]
 
         return StateSnapshot(
             company_id=self.company_id,
             agent_type=self.agent_type.value,
             cash=cash,
             recent_events=recent,
-            company_context=raw_data.get("payment_history", {}) if raw_data else {},
+            company_context=company_context,
             previous_decisions=[
                 {
                     "type": d.decision_type.value,
@@ -139,16 +127,17 @@ RULES:
             ],
         )
 
-    def _enrich_cash_state(
+    def _compute_deterministic_metrics(
         self, cash: CashState, raw_data: dict[str, Any]
     ) -> CashState:
         """
         Calculs DÉTERMINISTES — jamais délégués au LLM.
 
-        Le LLM reçoit les résultats, pas les inputs.
+        Le LLM reçoit les RÉSULTATS, pas les inputs.
+        Il interprète, il ne calcule pas.
         """
         # Burn rate
-        if cash.monthly_expenses > 0:
+        if cash.monthly_expenses > 0 and cash.monthly_revenue >= 0:
             cash.monthly_burn_rate = cash.monthly_expenses - cash.monthly_revenue
 
         # Runway
@@ -159,28 +148,48 @@ RULES:
         elif cash.monthly_burn_rate <= 0:
             cash.runway_months = 99.0  # Cash positive
 
-        # Payment stats from history
+        # Payment delay stats from history
         history = raw_data.get("payment_history", {})
-        if history.get("delays"):
-            delays = history["delays"]
-            import statistics as stats
-            cash.avg_payment_delay_days = round(stats.mean(delays), 1)
+        delays = history.get("delays", [])
+        if delays and len(delays) >= 3:
+            cash.avg_payment_delay_days = round(stats_lib.mean(delays), 1)
 
         return cash
 
     def validate_decision(self, decision: Decision) -> list[str]:
-        """Valide les règles métier Cash."""
+        """
+        Valide les règles métier Cash.
+
+        Interdictions :
+          - Actions financières directes (paiements, virements)
+          - Invoice reminders sans invoice_id
+          - Montants inventés
+        """
         errors: list[str] = []
 
         for action in decision.actions:
             # Pas de paiement automatique
-            if action.action in ("make_payment", "transfer_funds"):
-                errors.append("INTERDIT : action financière directe")
+            if action.action in (
+                "make_payment",
+                "transfer_funds",
+                "wire_transfer",
+                "refund",
+            ):
+                errors.append(
+                    f"INTERDIT : action financière directe '{action.action}'"
+                )
 
-            # Les rappels de facture sont OK mais doivent avoir un montant
+            # Les rappels de facture doivent avoir un invoice_id
             if action.action == "send_invoice_reminder":
                 if not action.parameters.get("invoice_id"):
-                    errors.append("send_invoice_reminder sans invoice_id")
+                    errors.append(
+                        "send_invoice_reminder sans invoice_id"
+                    )
+                amount = action.parameters.get("amount")
+                if amount is not None and amount < 0:
+                    errors.append(
+                        f"Montant négatif dans invoice_reminder : {amount}"
+                    )
 
         return errors
 
@@ -188,11 +197,19 @@ RULES:
         return DecisionType.FORECAST_CASH
 
     # ──────────────────────────────────────────────────────
-    # CONVENIENCE
+    # CONVENIENCE METHODS — Raccourcis par action
     # ──────────────────────────────────────────────────────
 
-    async def forecast(self, cash_data: dict[str, Any]) -> Decision:
-        """Forecast cash + 3 scénarios."""
+    async def forecast(
+        self, cash_data: dict[str, Any]
+    ) -> Decision:
+        """
+        Cash Forecast + 3 scénarios.
+
+        Base, Stress, Upside — toujours les 3.
+        Calculs déterministes dans build_snapshot,
+        interprétation par le LLM.
+        """
         return await self.run(
             raw_data={"cash": cash_data},
             prompt_name="cash_predictability/forecast",
@@ -201,13 +218,28 @@ RULES:
     async def detect_payment_risks(
         self,
         cash_data: dict[str, Any],
-        payment_history: list[dict[str, Any]],
+        payment_history: list[dict[str, Any]] | list[float],
     ) -> Decision:
-        """Action 3.2 — Payment pattern detection."""
+        """
+        Action 3.2 — Payment Pattern Detection [A].
+
+        Analyse : mean delay, variance, 90-day trend slope.
+        Statistiques en Python, interprétation par le LLM.
+        """
+        # Normaliser l'historique
+        if payment_history and isinstance(payment_history[0], (int, float)):
+            delays = payment_history
+        else:
+            delays = [
+                p.get("delay_days", 0)
+                for p in payment_history
+                if isinstance(p, dict)
+            ]
+
         return await self.run(
             raw_data={
                 "cash": cash_data,
-                "payment_history": {"delays": payment_history},
+                "payment_history": {"delays": delays},
             },
             prompt_name="cash_predictability/payment_risk",
         )
@@ -215,8 +247,13 @@ RULES:
     async def generate_preventive_plan(
         self, cash_data: dict[str, Any]
     ) -> Decision:
-        """Action 3.5 — Cash preventive plan [B]."""
+        """
+        Action 3.5 — Cash Preventive Plan [B].
+
+        Risk B : recommandations stratégiques → validation CEO.
+        3 leviers quantifiés minimum.
+        """
         return await self.run(
             raw_data={"cash": cash_data},
             prompt_name="cash_predictability/preventive_plan",
-       )
+        )
