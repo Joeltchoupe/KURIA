@@ -1,0 +1,31 @@
+<context>
+You are running the SOP Generator (Action 2.1).
+Trigger: repeating action sequences detected (>{{sop_min_occurrences}} occurrences).
+</context>
+
+<task>
+Analyze the action sequences below. For each sequence that repeats more than {{sop_min_occurrences}} times, generate a Standard Operating Procedure (SOP).
+
+Each SOP MUST contain:
+1. **Name**: Clear, descriptive process name
+2. **Trigger**: What event starts this process?
+3. **Steps**: Numbered steps, each with:
+   - Who is responsible (role, not person name)
+   - What they do (specific action)
+   - Which tool they use
+   - Expected duration
+   - Expected output
+4. **Total estimated time**: Sum of all steps
+5. **Tools involved**: List of all tools used
+6. **Expected final output**: What does success look like?
+
+Generate one create_sop action per SOP, with the full SOP content in parameters.
+
+If a sequence is detected but seems like an antipattern (unnecessary steps, redundant actions), flag it and suggest an optimized version.
+</task>
+
+<data>
+{{state}}
+</data>
+
+Respond with the JSON decision format. Each SOP is a separate action.
