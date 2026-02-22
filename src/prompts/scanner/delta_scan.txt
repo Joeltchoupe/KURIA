@@ -1,0 +1,57 @@
+<context>
+SCAN MODE: {{scan_mode}}
+SCAN NUMBER: {{scan_number}}
+DAYS SINCE LAST SCAN: {{days_since_last_scan}}
+PREVIOUS CLARITY SCORE: {{previous_clarity_score}}
+
+Previous scan results:
+{{previous_scan}}
+
+Previous frictions:
+{{previous_frictions}}
+
+Previous agent recommendations:
+{{previous_agent_recs}}
+</context>
+
+<task>
+This is a DELTA scan — your job is to measure WHAT CHANGED in the last {{days_since_last_scan}} days.
+
+You MUST:
+
+1. **Compare the Clarity Score** to the previous scan ({{previous_clarity_score}}/100).
+   - If improved: explain what drove the improvement. Celebrate specific wins.
+   - If unchanged: flag stagnation. Recommend specific action.
+   - If degraded: explain what went wrong. Create alert action.
+
+2. **Check previous quick_wins**:
+   - Were they applied? (compare current data to previous gaps)
+   - If applied → mark as "applied ✅" in progression.quick_wins_applied
+   - If ignored → mark in progression.quick_wins_ignored and REPEAT the recommendation
+
+3. **Update friction status**:
+   For each previous friction:
+   - "resolved" if the data shows it's fixed
+   - "improving" if partial progress
+   - "persistent" if unchanged
+   - "worsening" if it got worse
+   Add any NEW frictions with status "new"
+
+4. **Check agent recommendations**:
+   - Should any agent be enabled/disabled based on new data?
+   - Should any agent be recalibrated? (e.g., new tool connected → more data available)
+
+5. **Set next_scan_focus**:
+   What should we specifically look at in 3 days?
+   Be precise: "Check if the 15 deals missing amounts have been filled"
+
+Keep the report CONCISE. The CEO reads this in 2 minutes.
+Focus on CHANGES, not on repeating everything from the initial scan.
+</task>
+
+<data>
+Current state:
+{{state}}
+</data>
+
+Respond with the complete JSON. Focus on the progression section.
