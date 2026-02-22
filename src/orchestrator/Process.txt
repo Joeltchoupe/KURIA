@@ -1,0 +1,8 @@
+Scan → ProfileGenerator → AgentConfigSet
+         ↓
+Engine.register_agent() × 4
+         ↓
+Engine.run_daily()  → agents run → Coordinator routes signals
+Engine.run_weekly() → agents run → Adapter recalibrates → Reporter compiles
+         ↓
+WeeklyReport → email CEO lundi 7h
