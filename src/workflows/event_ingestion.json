@@ -1,0 +1,75 @@
+{
+  "name": "Kuria — Event Ingestion",
+  "description": "Reçoit les webhooks des outils connectés et les normalise en events_raw",
+  "trigger": "webhook",
+  "active": true,
+  "nodes": [
+    {
+      "name": "Webhook Receiver",
+      "type": "n8n-nodes-base.webhook",
+      "position": [200, 300],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "events/ingest",
+        "authentication": "headerAuth",
+        "headerAuth": {
+          "name": "x-api-key",
+          "value": "={{$env.KURIA_API_KEY}}"
+        },
+        "responseMode": "onReceived",
+        "responseCode": 202
+      }
+    },
+    {
+      "name": "Normalize Event",
+      "type": "n8n-nodes-base.code",
+      "position": [400, 300],
+      "parameters": {
+        "language": "javascript",
+        "code": "const body = $input.first().json;\n\nconst event = {\n  company_id: body.company_id || body.account_id || '',\n  event_type: body.event_type || body.type || 'custom',\n  source: body.source || body.origin || 'unknown',\n  actor: body.actor || body.user || '',\n  payload: body.payload || body.data || body,\n  metadata: {\n    received_at: new Date().toISOString(),\n    raw_headers: $input.first().headers || {}\n  }\n};\n\nreturn [{json: event}];"
+      }
+    },
+    {
+      "name": "Store in Supabase",
+      "type": "n8n-nodes-base.supabase",
+      "position": [600, 300],
+      "parameters": {
+        "operation": "insert",
+        "table": "events_raw",
+        "columns": "company_id,event_type,source,actor,payload,metadata"
+      },
+      "credentials": {
+        "supabaseApi": "kuria_supabase"
+      }
+    },
+    {
+      "name": "Check Critical Event",
+      "type": "n8n-nodes-base.if",
+      "position": [800, 300],
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{$json.event_type}}",
+              "operation": "contains",
+              "value2": "overdue"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "Trigger Alert",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [1000, 200],
+      "parameters": {
+        "method": "POST",
+        "url": "={{$env.KURIA_API_URL}}/api/alerts/critical",
+        "headers": {
+          "x-api-key": "={{$env.KURIA_API_KEY}}"
+        },
+        "body": "={{JSON.stringify($json)}}"
+      }
+    }
+  ]
+    }
