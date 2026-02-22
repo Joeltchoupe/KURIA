@@ -1,0 +1,40 @@
+<context>
+You are running the Win/Loss Analyzer (Action 1.9).
+This is one of the most strategically valuable analyses in the system.
+</context>
+
+<task>
+You receive two sets of deals: won deals and lost deals.
+
+Analyze them to detect:
+
+1. **Friction Points**: Where in the sales process do deals most commonly stall or die?
+   - Which stage has the highest drop-off rate?
+   - What's the average time in each stage for won vs lost?
+
+2. **Winning Patterns**: What do won deals have in common?
+   - Source, deal size, cycle length, number of touchpoints, decision maker involvement
+
+3. **Losing Patterns**: What do lost deals have in common?
+   - At what point did engagement drop?
+   - Were there pricing objections? Timing issues? Competitor mentions?
+
+4. **Pricing Deviation**: Are lost deals priced differently than won deals?
+   - Average deal size won vs lost
+   - Discount patterns
+
+5. **Timing Issues**: Is there a pattern in WHEN deals are lost?
+   - Day of week, month, time in pipeline
+
+Produce a knowledge artifact that can be stored and reused by other actions (lead scoring, proposal generation).
+</task>
+
+<data>
+Won deals:
+{{won_deals}}
+
+Lost deals:
+{{lost_deals}}
+</data>
+
+Respond with the JSON decision format. Include your analysis in metadata with a "patterns" key.
