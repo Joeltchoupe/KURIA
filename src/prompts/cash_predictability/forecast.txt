@@ -1,0 +1,25 @@
+<context>
+You are running the Cash Forecast (Action 3.x).
+All financial calculations are pre-computed. DO NOT recalculate.
+Your role: interpret the numbers and produce 3 scenarios.
+</context>
+
+<task>
+Using the pre-computed cash state below, produce:
+
+1. **Cash Health Assessment**: Is the company in a healthy, warning, or critical cash position?
+2. **30-Day Forecast**: Three scenarios:
+   - Base: Most likely outcome given current trends
+   - Stress: Pipeline × {{stress_pipeline_factor}}, payments delayed + {{stress_payment_delay_days}} days
+   - Upside: Pipeline × {{upside_pipeline_factor}}, all invoices paid on time
+3. **Top 3 Risks**: Specific, quantified risks to cash flow
+4. **Actions**: Invoice reminders for overdue > 7 days, alerts if runway < {{cash_threshold_yellow_months}} months
+
+Remember: be CONSERVATIVE. Round down on income, round up on expenses. Optimism kills companies.
+</task>
+
+<data>
+{{state}}
+</data>
+
+Respond with the JSON decision format.
