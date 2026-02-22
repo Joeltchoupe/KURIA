@@ -39,8 +39,13 @@ from models.events import (
     EventPriority,
 )
 from models.agent_config import (
+    # Générique (consommé par les agents)
     AgentType,
+    Threshold,
+    AgentConfig,
+    # Typé fort (utilisé par l'orchestrateur)
     BaseAgentConfig,
+    ScoreWeights,
     RevenueVelocityConfig,
     ProcessClarityConfig,
     CashPredictabilityConfig,
@@ -90,9 +95,13 @@ __all__ = [
     "Event",
     "EventType",
     "EventPriority",
-    # Agent Config
+    # Agent Config — Générique
     "AgentType",
+    "Threshold",
+    "AgentConfig",
+    # Agent Config — Typé fort
     "BaseAgentConfig",
+    "ScoreWeights",
     "RevenueVelocityConfig",
     "ProcessClarityConfig",
     "CashPredictabilityConfig",
