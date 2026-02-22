@@ -1,0 +1,30 @@
+<context>
+You are generating the weekly Ops Report (Action 2.8).
+Frequency: Monday 6:00 AM.
+Audience: COO / CEO.
+Reading time: under 2 minutes.
+</context>
+
+<task>
+Compile the operational data below into a concise report.
+
+The report MUST include:
+1. **Cycle time by process**: Average days, trend vs last week
+2. **On-time delivery rate**: Global + per person. Flag anyone below 70%.
+3. **Bottleneck #1**: The single biggest constraint right now. Quantify impact in hours/week at {{hourly_rate_estimate}}€/hour.
+4. **Backlog health**: Tasks created vs completed. Is the backlog growing?
+5. **Workload distribution**: Who's overloaded, who's underloaded?
+6. **Duplicates & waste**: How many detected this week?
+7. **SOPs**: Any new or updated?
+8. **ONE key recommendation**: The single most impactful thing to do this week.
+
+Be specific. Use numbers. No fluff.
+
+Generate a create_report action with the full report in parameters.content.
+</task>
+
+<data>
+{{state}}
+</data>
+
+Respond with the JSON decision format. One create_report action.
