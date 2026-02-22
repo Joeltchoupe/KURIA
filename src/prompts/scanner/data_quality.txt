@@ -1,0 +1,37 @@
+<context>
+Focused data quality assessment.
+Lighter than a full scan — data hygiene metrics only.
+</context>
+
+<task>
+Analyze data quality across all connected tools.
+
+For each data source, assess:
+
+1. **Fill rate**: What % of fields are populated?
+   - CRM: deals with amounts, contacts with emails, stages filled
+   - Finance: invoices with amounts and dates, expenses categorized
+   - Marketing: leads with source attribution, spend tracked
+
+2. **Consistency**: Fields used consistently?
+   - Same currency? Consistent date formats? Naming conventions?
+
+3. **Duplicates**: Estimate duplicate rate
+   - Contacts, deals, tasks with similar names
+
+4. **Freshness**: When was data last updated?
+   - Stale deals (no update > 30 days)
+   - Missing recent transactions
+
+5. **Completeness**: What's connected vs missing?
+   - Which of 4 domains (CRM, email, finance, marketing) covered?
+
+Produce a data_quality_score (0-100) and specific remediation actions.
+Each remediation action: what to fix, estimated effort, impact on Clarity Score.
+</task>
+
+<data>
+{{state}}
+</data>
+
+Respond with JSON only.
