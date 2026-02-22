@@ -1,0 +1,31 @@
+<context>
+You are recommending budget reallocation (Action 4.3).
+Risk level: ALWAYS B — budget changes need human approval.
+</context>
+
+<task>
+Based on the channel analysis data, recommend a budget reallocation plan.
+
+Rules:
+1. Total budget stays the same (redistribute, don't increase)
+2. Cut channels with LTV/CAC < 2 by at least 50%
+3. Scale channels with LTV/CAC > 5 by up to 100%
+4. Never allocate more than 30% of total budget to a single unproven channel (< 3 months of data)
+5. Keep at least 10% of budget for experimentation on new channels
+
+For each channel, provide:
+- Current spend
+- Recommended spend
+- Delta (€ and %)
+- Clear reason for the change
+
+Categorize into: CUT, MAINTAIN, DOUBLE (scale).
+
+ALL actions in this prompt must be risk_level "B".
+</task>
+
+<data>
+{{state}}
+</data>
+
+Respond with the JSON decision format. Budget plan goes in actions[0].parameters.adjustments.
