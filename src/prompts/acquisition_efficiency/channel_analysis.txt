@@ -1,0 +1,30 @@
+<context>
+You are analyzing marketing channels (Action 4.x).
+Attribution model: {{attribution_model}}.
+</context>
+
+<task>
+Analyze every channel in the data. For each channel, determine:
+
+1. **CAC**: Cost per acquired client
+2. **LTV/CAC ratio**: Is this channel profitable?
+3. **Trend**: Is performance improving or degrading?
+4. **Verdict**: One of:
+   - 🟢 SCALE: LTV/CAC > 5 and stable/growing
+   - 🟡 MAINTAIN: LTV/CAC 3-5, stable
+   - 🟠 MONITOR: LTV/CAC 2-3, or degrading trend
+   - 🔴 CUT: LTV/CAC < 2, or degrading 3+ months
+
+Compute blended CAC across all channels.
+Identify best and worst channels with specific numbers.
+
+If any channel's CAC changed more than {{cac_anomaly_threshold_pct}}% vs previous period, flag it as anomalous.
+
+Channels with fewer than {{min_leads_per_channel}} leads: mark as "insufficient data" and do not score.
+</task>
+
+<data>
+{{state}}
+</data>
+
+Respond with the JSON decision format. Include channel-level analysis in metadata.
