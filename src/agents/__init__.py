@@ -5,7 +5,7 @@ KURIA Agents — LLM-first, Decision Engine.
   Trigger → State → LLM → Decision → Validate → Execute → Log
 
 Le code est le plombier. Le LLM est le cerveau.
-Les prompts sont la logique métier.
+Les prompts (fichiers .txt) sont la logique métier.
 """
 
 from agents.base import BaseAgent
