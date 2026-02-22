@@ -1,0 +1,82 @@
+{
+  "name": "Kuria — Weekly Adaptation (Monday 8AM)",
+  "description": "Recalibre les configs des agents après le rapport hebdo",
+  "trigger": "cron",
+  "active": true,
+  "nodes": [
+    {
+      "name": "CRON Monday 8AM",
+      "type": "n8n-nodes-base.cron",
+      "position": [200, 300],
+      "parameters": {
+        "triggerTimes": {
+          "item": [
+            {
+              "mode": "custom",
+              "cronExpression": "0 8 * * 1"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "Get Active Companies",
+      "type": "n8n-nodes-base.supabase",
+      "position": [400, 300],
+      "parameters": {
+        "operation": "getAll",
+        "table": "companies",
+        "filters": {
+          "is_active": true
+        }
+      }
+    },
+    {
+      "name": "For Each Company",
+      "type": "n8n-nodes-base.splitInBatches",
+      "position": [600, 300],
+      "parameters": {
+        "batchSize": 1
+      }
+    },
+    {
+      "name": "Run Adaptation",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [800, 300],
+      "parameters": {
+        "method": "POST",
+        "url": "={{$env.KURIA_API_URL}}/api/orchestrator/adapt",
+        "headers": {
+          "x-api-key": "={{$env.KURIA_API_KEY}}",
+          "Content-Type": "application/json"
+        },
+        "body": "{\"company_id\": \"={{$json.id}}\"}"
+      }
+    },
+    {
+      "name": "Log Adaptations",
+      "type": "n8n-nodes-base.if",
+      "position": [1000, 300],
+      "parameters": {
+        "conditions": {
+          "number": [
+            {
+              "value1": "={{$json.adjustment_count}}",
+              "operation": "greaterThan",
+              "value2": 0
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "Notify Adjustments",
+      "type": "n8n-nodes-base.slack",
+      "position": [1200, 200],
+      "parameters": {
+        "channel": "#kuria-ops",
+        "text": "🔧 {{$json.adjustment_count}} config adjustments made for {{$json.company_id}}"
+      }
+    }
+  ]
+    }
