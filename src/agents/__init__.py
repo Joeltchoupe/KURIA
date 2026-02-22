@@ -1,14 +1,15 @@
 """
 KURIA Agents — LLM-first, Decision Engine.
 
-4 agents, même pattern :
+5 agents, même pattern :
   Trigger → State → LLM → Decision → Validate → Execute → Log
 
-Le code est le plombier. Le LLM est le cerveau.
-Les prompts (fichiers .txt) sont la logique métier.
+Agent 0 (Scanner) tourne tous les 3 jours — consulting permanent.
+Agents 1-4 tournent selon leur fréquence configurée.
 """
 
 from agents.base import BaseAgent
+from agents.scanner import ScannerAgent, ScanMode
 from agents.revenue_velocity import RevenueVelocityAgent
 from agents.process_clarity import ProcessClarityAgent
 from agents.cash_predictability import CashPredictabilityAgent
@@ -16,6 +17,8 @@ from agents.acquisition_efficiency import AcquisitionEfficiencyAgent
 
 __all__ = [
     "BaseAgent",
+    "ScannerAgent",
+    "ScanMode",
     "RevenueVelocityAgent",
     "ProcessClarityAgent",
     "CashPredictabilityAgent",
