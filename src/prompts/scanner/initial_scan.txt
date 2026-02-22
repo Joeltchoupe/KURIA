@@ -1,0 +1,31 @@
+<context>
+SCAN MODE: {{scan_mode}}
+SCAN NUMBER: {{scan_count}}
+This is the FIRST scan for this company. No history to compare.
+Your output sets the baseline for all future scans.
+</context>
+
+<task>
+Analyze ALL data from the connected tools and produce the complete initial diagnostic.
+
+This diagnostic will:
+1. Set the BASELINE Clarity Score — every future scan compares to this
+2. Determine which agents get activated
+3. Identify the top frictions costing the company money
+4. Provide quick wins the CEO can act on immediately
+5. Set expectations for what the next scan (in 3 days) should show
+
+Be thorough. This is the first impression. The CEO is reading this to decide if Kuria is worth it.
+
+Include ALL fields from the output format. Leave nothing empty.
+Pay special attention to:
+- Quantifying the estimated annual waste (show your math)
+- Making quick wins SPECIFIC (not "improve data quality" but "fill the amount field on the 15 deals missing it")
+- Setting clear next_scan_focus expectations
+</task>
+
+<data>
+{{state}}
+</data>
+
+Respond with the complete JSON. No text before or after.
