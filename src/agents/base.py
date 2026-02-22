@@ -1,365 +1,404 @@
 """
-KURIA Agents — Base abstraite.
+BaseAgent — Pattern universel LLM-first.
 
-Contrat strict que chaque agent doit respecter :
-1. _validate(data)      → Vérifie les données d'entrée, retourne warnings
-2. _execute(data)       → Logique métier pure, retourne dict
-3. _confidence(in, out) → Score de confiance 0.0-1.0
-4. _emit_event(...)     → Collecte événements, flush après execute()
+CHAQUE agent suit le même cycle :
 
-Le cycle de vie est géré par execute() qui orchestre tout :
-  validate → execute → confidence → flush events → return AgentResult
+  Trigger
+    → Build State Snapshot
+    → Send to LLM (avec system prompt spécifique)
+    → Parse Decision (JSON structuré)
+    → Validate (règles métier, safety)
+    → Execute Actions (via ActionExecutor)
+    → Log Everything
+
+L'agent ne FAIT rien lui-même.
+Il ORCHESTRE : state → LLM → decision → action.
+
+Le code est le plombier.
+Le LLM est le cerveau.
+Les prompts sont la logique métier.
 """
 
 from __future__ import annotations
 
-import abc
-import time
-import uuid
-import logging
-from datetime import datetime, timezone
-from typing import Any, Generic, Optional, TypeVar
+from abc import ABC, abstractmethod
+from datetime import datetime
+from typing import Any
 
-from pydantic import BaseModel, Field
-
-from models.agent_config import BaseAgentConfig
-from models.events import Event, EventType, EventPriority
-
-
-# ══════════════════════════════════════════
-# TYPES
-# ══════════════════════════════════════════
-
-ConfigT = TypeVar("ConfigT", bound=BaseAgentConfig)
+from models.event import Event
+from models.state import StateSnapshot
+from models.decision import Decision, ActionRequest, RiskLevel
+from models.action import Action, ActionStatus, ActionLog
+from models.agent_config import AgentConfig, AgentType
+from services.config import get_settings, LLMProvider
+from services.llm.client import LLMClient, LLMResponse
+from services.llm.prompts import PromptManager
+from services.llm.parser import ResponseParser, ParseError
 
 
-class AgentResult(BaseModel):
-    """Résultat standardisé de tout agent."""
-
-    agent_name: str
-    company_id: str
-    run_id: str
-    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    data: dict[str, Any] = Field(default_factory=dict)
-    confidence: float = Field(ge=0.0, le=1.0)
-    warnings: list[str] = Field(default_factory=list)
-    errors: list[str] = Field(default_factory=list)
-    execution_time_ms: int = 0
-    events_emitted: int = 0
-    mode: str = "full"  # "full" | "observation" | "degraded"
-
-
-# ══════════════════════════════════════════
-# EXCEPTIONS
-# ══════════════════════════════════════════
-
-
-class AgentError(Exception):
-    """Erreur générique agent."""
-
-    def __init__(self, agent_name: str, detail: str):
-        self.agent_name = agent_name
-        self.detail = detail
-        super().__init__(f"[{agent_name}] {detail}")
-
-
-class InsufficientDataError(AgentError):
-    """Pas assez de données pour analyser — déclenche le mode observation."""
-
-    def __init__(self, agent_name: str, detail: str, available: int = 0, required: int = 0):
-        self.available = available
-        self.required = required
-        super().__init__(agent_name=agent_name, detail=detail)
-
-
-class ConnectorDataError(AgentError):
-    """Données du connecteur invalides ou corrompues."""
-    pass
-
-
-# ══════════════════════════════════════════
-# BASE AGENT — ABC
-# ══════════════════════════════════════════
-
-
-class BaseAgent(abc.ABC, Generic[ConfigT]):
-    """Classe abstraite pour tous les agents KURIA.
-
-    Cycle de vie :
-        result = await agent.execute(data)
-
-    Implémentation requise :
-        _validate(data)         → list[str]  (warnings)
-        _execute(data)          → dict[str, Any]
-        _confidence(in, out)    → float
+class BaseAgent(ABC):
     """
+    Agent de base — LLM-first.
 
-    AGENT_NAME: str = "base"  # Override dans chaque sous-classe
+    Chaque agent concret implémente :
+      - agent_type      → son type
+      - system_prompt    → son identité
+      - build_snapshot() → quelles données il envoie au LLM
+      - validate()       → règles métier spécifiques
+      - action_map       → quelles actions il peut demander
+
+    Le cycle run() est IDENTIQUE pour tous les agents.
+    """
 
     def __init__(
         self,
-        company_id: str,
-        config: ConfigT,
-        *,
-        run_id: Optional[str] = None,
-        supabase_client: Any = None,
-        claude_client: Any = None,
-    ):
-        self.company_id = company_id
+        config: AgentConfig,
+        llm: LLMClient | None = None,
+        prompts: PromptManager | None = None,
+        parser: ResponseParser | None = None,
+        executor: Any | None = None,
+    ) -> None:
         self.config = config
-        self.run_id = run_id or str(uuid.uuid4())
-        self.supabase = supabase_client
-        self.claude = claude_client
+        self.company_id = config.company_id
 
-        # Structured logger
-        self.logger = logging.getLogger(f"kuria.agent.{self.AGENT_NAME}")
-        self._log_context = {
-            "agent": self.AGENT_NAME,
-            "company_id": self.company_id,
-            "run_id": self.run_id,
-        }
+        # Services (injectés ou créés)
+        self._llm = llm or LLMClient()
+        self._prompts = prompts or PromptManager()
+        self._parser = parser or ResponseParser()
+        self._executor = executor
 
-        # Event buffer — flush après execute()
-        self._pending_events: list[Event] = []
+        # State
+        self._logs: list[ActionLog] = []
+        self._decisions: list[Decision] = []
+        self._pending_actions: list[Action] = []
 
-    # ──────────────────────────────────────
-    # PUBLIC API — Point d'entrée unique
-    # ──────────────────────────────────────
+    # ──────────────────────────────────────────────────────
+    # ABSTRACT — Chaque agent implémente
+    # ──────────────────────────────────────────────────────
 
-    async def execute(self, data: dict[str, Any]) -> AgentResult:
-        """Orchestre le cycle complet : validate → execute → confidence → result.
+    @property
+    @abstractmethod
+    def agent_type(self) -> AgentType:
+        """Type de l'agent."""
+        ...
 
-        Ne PAS override cette méthode. Override _validate, _execute, _confidence.
+    @property
+    @abstractmethod
+    def system_prompt(self) -> str:
+        """System prompt de l'agent."""
+        ...
+
+    @abstractmethod
+    async def build_snapshot(
+        self,
+        events: list[Event] | None = None,
+        raw_data: dict[str, Any] | None = None,
+    ) -> StateSnapshot:
         """
-        self._pending_events.clear()
-        start = time.perf_counter()
-        warnings: list[str] = []
-        errors: list[str] = []
-        mode = "full"
-        output_data: dict[str, Any] = {}
-        confidence = 0.0
+        Construit le state snapshot à envoyer au LLM.
 
-        try:
-            # 1. Validation
-            self._log("info", "Starting validation")
-            warnings = self._validate(data)
-            if warnings:
-                self._log("warning", f"Validation warnings: {warnings}")
+        Chaque agent décide quelles données sont pertinentes.
+        """
+        ...
 
-            # 2. Exécution
-            self._log("info", "Starting execution")
-            output_data = await self._execute(data)
-            mode = output_data.pop("__mode__", "full")
+    @abstractmethod
+    def validate_decision(self, decision: Decision) -> list[str]:
+        """
+        Valide une décision selon les règles métier.
 
-            # 3. Confidence
-            confidence = self._confidence(data, output_data)
-            self._log("info", f"Confidence: {confidence:.2f}, mode: {mode}")
+        Returns:
+            Liste d'erreurs. Vide = valide.
+        """
+        ...
 
-        except InsufficientDataError as e:
-            self._log("warning", f"Insufficient data: {e.detail}")
-            mode = "observation"
-            output_data = await self._observation_mode(data, e)
-            confidence = self._confidence(data, output_data)
-            warnings.append(e.detail)
+    # ──────────────────────────────────────────────────────
+    # RUN CYCLE — Identique pour tous les agents
+    # ──────────────────────────────────────────────────────
 
-        except ConnectorDataError as e:
-            self._log("error", f"Connector error: {e.detail}")
-            mode = "degraded"
-            errors.append(e.detail)
-            confidence = 0.0
+    async def run(
+        self,
+        events: list[Event] | None = None,
+        raw_data: dict[str, Any] | None = None,
+        prompt_name: str | None = None,
+        prompt_variables: dict[str, Any] | None = None,
+    ) -> Decision:
+        """
+        Cycle complet : Snapshot → LLM → Decision → Validate → Execute.
 
-        except Exception as e:
-            self._log("error", f"Unexpected error: {e}", exc_info=True)
-            errors.append(str(e))
-            confidence = 0.0
+        Args:
+            events: Événements déclencheurs.
+            raw_data: Données brutes additionnelles.
+            prompt_name: Template de prompt à utiliser (optionnel).
+            prompt_variables: Variables additionnelles pour le prompt.
 
-        elapsed_ms = int((time.perf_counter() - start) * 1000)
-
-        # 4. Flush events
-        events_count = len(self._pending_events)
-        await self._flush_events()
-
-        # 5. Persist metrics
-        await self._record_metrics(output_data, confidence, elapsed_ms)
-
-        result = AgentResult(
-            agent_name=self.AGENT_NAME,
+        Returns:
+            Decision produite par le LLM.
+        """
+        started_at = datetime.utcnow()
+        log = ActionLog(
             company_id=self.company_id,
-            run_id=self.run_id,
-            data=output_data,
-            confidence=confidence,
-            warnings=warnings,
-            errors=errors,
-            execution_time_ms=elapsed_ms,
-            events_emitted=events_count,
-            mode=mode,
+            agent_type=self.agent_type.value,
+            event_type="agent_run",
         )
 
-        self._log("info", f"Completed in {elapsed_ms}ms — {mode}")
-        return result
+        try:
+            # 1. Build snapshot
+            snapshot = await self.build_snapshot(events, raw_data)
+            log.input_snapshot = snapshot.summary
 
-    # ──────────────────────────────────────
-    # ABSTRACT — À implémenter par chaque agent
-    # ──────────────────────────────────────
+            # 2. Build prompt
+            user_prompt = self._build_prompt(
+                snapshot, prompt_name, prompt_variables
+            )
 
-    @abc.abstractmethod
-    def _validate(self, data: dict[str, Any]) -> list[str]:
-        """Valide les données d'entrée. Retourne la liste des warnings.
-        Raise InsufficientDataError ou ConnectorDataError si bloquant."""
-        ...
+            # 3. Call LLM
+            llm_response = await self._call_llm(user_prompt)
+            log.llm_provider = llm_response.provider.value
+            log.llm_model = llm_response.model
+            log.llm_tokens = llm_response.total_tokens
+            log.llm_cost_usd = llm_response.cost_usd
+            log.latency_ms = llm_response.latency_ms
 
-    @abc.abstractmethod
-    async def _execute(self, data: dict[str, Any]) -> dict[str, Any]:
-        """Logique métier pure. Retourne les résultats.
-        Peut injecter __mode__ = 'observation' dans le retour."""
-        ...
+            if not llm_response.success:
+                raise RuntimeError(f"LLM call failed: {llm_response.error}")
 
-    @abc.abstractmethod
-    def _confidence(self, input_data: dict[str, Any], output_data: dict[str, Any]) -> float:
-        """Calcule le score de confiance entre 0.0 et 1.0."""
-        ...
+            # 4. Parse decision
+            decision = self._parse_decision(llm_response, snapshot.id)
+            log.output_decision = decision.model_dump(
+                include={"decision_type", "confidence", "risk_level", "reasoning"}
+            )
 
-    async def _observation_mode(self, data: dict[str, Any], error: InsufficientDataError) -> dict[str, Any]:
-        """Mode dégradé par défaut. Override pour personnaliser."""
-        return {
-            "mode": "observation",
-            "message": error.detail,
-            "available": error.available,
-            "required": error.required,
+            # 5. Validate
+            errors = self.validate_decision(decision)
+            decision.validation_errors = errors
+            decision.validated = len(errors) == 0
+
+            # 6. Execute (if safe)
+            if decision.is_safe_to_execute and self._executor:
+                await self._execute_actions(decision)
+            elif decision.needs_approval:
+                self._queue_for_approval(decision)
+
+            self._decisions.append(decision)
+            log.success = True
+            log.description = (
+                f"Decision: {decision.decision_type.value} "
+                f"(confidence: {decision.confidence:.0%}, "
+                f"risk: {decision.risk_level.value})"
+            )
+
+            return decision
+
+        except Exception as e:
+            log.success = False
+            log.error = f"{type(e).__name__}: {str(e)}"
+
+            # Return a failed decision
+            return Decision(
+                agent_type=self.agent_type.value,
+                decision_type=self._default_decision_type(),
+                confidence=0.0,
+                reasoning=f"Agent error: {str(e)}",
+                risk_level=RiskLevel.C,
+                validated=False,
+                validation_errors=[str(e)],
+            )
+
+        finally:
+            elapsed = (datetime.utcnow() - started_at).total_seconds() * 1000
+            log.latency_ms = max(log.latency_ms, elapsed)
+            self._logs.append(log)
+
+    # ──────────────────────────────────────────────────────
+    # PROMPT BUILDING
+    # ──────────────────────────────────────────────────────
+
+    def _build_prompt(
+        self,
+        snapshot: StateSnapshot,
+        prompt_name: str | None = None,
+        extra_vars: dict[str, Any] | None = None,
+    ) -> str:
+        """Construit le user prompt à envoyer au LLM."""
+        variables = {
+            "state": snapshot.to_llm_payload(),
+            "company_id": self.company_id,
+            "timestamp": datetime.utcnow().isoformat(),
+            **(extra_vars or {}),
         }
 
-    # ──────────────────────────────────────
-    # EVENT SYSTEM
-    # ──────────────────────────────────────
+        if prompt_name and self._prompts.exists(prompt_name):
+            return self._prompts.render(prompt_name, **variables)
 
-    def _emit_event(
-        self,
-        event_type: EventType,
-        payload: dict[str, Any],
-        priority: EventPriority = EventPriority.MEDIUM,
-    ) -> None:
-        """Ajoute un événement au buffer. Sera flush après execute()."""
-        event = Event(
-            event_type=event_type,
-            priority=priority,
-            agent_name=self.AGENT_NAME,
-            company_id=self.company_id,
-            run_id=self.run_id,
-            payload=payload,
+        # Default : envoyer le state brut
+        return (
+            f"Voici l'état actuel de l'entreprise :\n\n"
+            f"{snapshot.to_llm_payload()}\n\n"
+            f"Analyse et produis ta décision au format JSON."
         )
-        self._pending_events.append(event)
-        self._log("debug", f"Event queued: {event_type.value}")
 
-    async def _flush_events(self) -> None:
-        """Persiste tous les événements en attente."""
-        if not self._pending_events:
-            return
+    # ──────────────────────────────────────────────────────
+    # LLM CALL
+    # ──────────────────────────────────────────────────────
 
-        if self.supabase:
-            try:
-                events_data = [e.model_dump(mode="json") for e in self._pending_events]
-                await self.supabase.insert_batch("agent_events", events_data)
-            except Exception as e:
-                self._log("error", f"Failed to flush {len(self._pending_events)} events: {e}")
-        else:
-            self._log("debug", f"No supabase client — {len(self._pending_events)} events logged only")
-            for event in self._pending_events:
-                self._log("info", f"EVENT: {event.event_type.value} | {event.payload}")
+    async def _call_llm(self, user_prompt: str) -> LLMResponse:
+        """Appelle le LLM avec le system prompt de l'agent."""
+        provider = None
+        model = self.config.llm_model
 
-        self._pending_events.clear()
+        # Déterminer le provider depuis le nom du modèle
+        if "claude" in model.lower():
+            provider = LLMProvider.CLAUDE
+        elif "gpt" in model.lower():
+            provider = LLMProvider.OPENAI
+        elif "gemini" in model.lower():
+            provider = LLMProvider.GEMINI
 
-    # ──────────────────────────────────────
-    # PERSISTENCE — Métriques
-    # ──────────────────────────────────────
+        return await self._llm.complete_structured(
+            prompt=user_prompt,
+            system=self.system_prompt,
+            provider=provider,
+            model=model,
+        )
 
-    async def _record_metrics(
-        self,
-        output_data: dict[str, Any],
-        confidence: float,
-        execution_time_ms: int,
-    ) -> None:
-        """Persiste les métriques de ce run."""
-        if not self.supabase:
-            return
+    # ──────────────────────────────────────────────────────
+    # DECISION PARSING
+    # ──────────────────────────────────────────────────────
 
+    def _parse_decision(
+        self, response: LLMResponse, snapshot_id: str
+    ) -> Decision:
+        """Parse la réponse LLM en Decision structurée."""
         try:
-            await self.supabase.insert("agent_runs", {
-                "run_id": self.run_id,
-                "agent_name": self.AGENT_NAME,
-                "company_id": self.company_id,
-                "confidence": confidence,
-                "execution_time_ms": execution_time_ms,
-                "created_at": datetime.now(timezone.utc).isoformat(),
-            })
-        except Exception as e:
-            self._log("error", f"Failed to record metrics: {e}")
-
-    async def get_previous_metrics(self) -> Optional[dict[str, Any]]:
-        """Récupère les métriques du run précédent pour comparaison."""
-        if not self.supabase:
-            return None
-
-        try:
-            return await self.supabase.get_latest(
-                "agent_metrics",
-                filters={
-                    "agent_name": self.AGENT_NAME,
-                    "company_id": self.company_id,
-                },
-                exclude_run_id=self.run_id,
+            data = self._parser.extract_json(response.content)
+        except ParseError:
+            # Le LLM n'a pas retourné du JSON valide
+            return Decision(
+                agent_type=self.agent_type.value,
+                decision_type=self._default_decision_type(),
+                confidence=0.3,
+                reasoning=response.content[:500],
+                risk_level=RiskLevel.C,
+                snapshot_id=snapshot_id,
             )
-        except Exception:
-            return None
 
-    # ──────────────────────────────────────
-    # HELPERS — Utilitaires partagés
-    # ──────────────────────────────────────
+        if not isinstance(data, dict):
+            data = {"reasoning": str(data)}
 
-    @staticmethod
-    def safe_divide(numerator: float, denominator: float, default: float = 0.0) -> float:
-        """Division sûre."""
-        if denominator == 0:
-            return default
-        return numerator / denominator
+        # Construire la decision
+        actions = []
+        for a in data.get("actions", []):
+            if isinstance(a, dict):
+                actions.append(ActionRequest(
+                    action=a.get("action", "unknown"),
+                    target=a.get("target", ""),
+                    parameters=a.get("parameters", {}),
+                    risk_level=RiskLevel(a.get("risk_level", "A")),
+                    priority=a.get("priority", 5),
+                ))
 
-    @staticmethod
-    def avg(values: list[float | int]) -> float:
-        """Moyenne sûre."""
-        if not values:
-            return 0.0
-        return sum(values) / len(values)
+        return Decision(
+            agent_type=self.agent_type.value,
+            decision_type=self._map_decision_type(
+                data.get("decision_type", data.get("action", "recommend"))
+            ),
+            confidence=float(data.get("confidence", 0.5)),
+            reasoning=data.get("reasoning", "No reasoning provided"),
+            actions=actions,
+            risk_level=RiskLevel(data.get("risk_level", "A")),
+            metadata=data.get("metadata", {}),
+            snapshot_id=snapshot_id,
+        )
 
-    @staticmethod
-    def median(values: list[float | int]) -> float:
-        """Médiane sûre."""
-        if not values:
-            return 0.0
-        s = sorted(values)
-        n = len(s)
-        if n % 2 == 0:
-            return (s[n // 2 - 1] + s[n // 2]) / 2
-        return float(s[n // 2])
+    def _map_decision_type(self, raw: str) -> "DecisionType":
+        """Mappe une string brute vers un DecisionType."""
+        from models.decision import DecisionType
+        try:
+            return DecisionType(raw)
+        except ValueError:
+            return self._default_decision_type()
 
-    @staticmethod
-    def format_currency(amount: Optional[float], symbol: str = "€") -> str:
-        """Formatte un montant."""
-        if amount is None:
-            return "N/A"
-        return f"{amount:,.0f} {symbol}"
+    @abstractmethod
+    def _default_decision_type(self) -> "DecisionType":
+        """DecisionType par défaut pour cet agent."""
+        ...
 
-    @staticmethod
-    def pct_change(current: float, previous: float) -> Optional[float]:
-        """Variation en pourcentage."""
-        if previous == 0:
-            return None
-        return round(((current - previous) / previous) * 100, 1)
+    # ──────────────────────────────────────────────────────
+    # EXECUTION
+    # ──────────────────────────────────────────────────────
 
-    # ──────────────────────────────────────
-    # LOGGING
-    # ──────────────────────────────────────
+    async def _execute_actions(self, decision: Decision) -> None:
+        """Exécute les actions d'une decision validée."""
+        for action_req in decision.actions:
+            action = Action(
+                decision_id=decision.id,
+                company_id=self.company_id,
+                agent_type=self.agent_type.value,
+                action=action_req.action,
+                target=action_req.target,
+                parameters=action_req.parameters,
+                risk_level=action_req.risk_level.value,
+                confidence=decision.confidence,
+                status=ActionStatus.EXECUTING,
+            )
 
-    def _log(self, level: str, message: str, **kwargs) -> None:
-        """Log structuré avec contexte agent."""
-        log_fn = getattr(self.logger, level, self.logger.info)
-        prefix = f"[{self.company_id}:{self.run_id[:8]}]"
-        log_fn(f"{prefix} {message}", **kwargs)
+            try:
+                if self._executor:
+                    result = await self._executor.execute(action)
+                    action.complete(result)
+                else:
+                    action.status = ActionStatus.PENDING
+            except Exception as e:
+                action.fail(str(e))
+
+        decision.executed = True
+        decision.executed_at = datetime.utcnow()
+
+    def _queue_for_approval(self, decision: Decision) -> None:
+        """Met les actions B en attente d'approbation."""
+        for action_req in decision.actions:
+            action = Action(
+                decision_id=decision.id,
+                company_id=self.company_id,
+                agent_type=self.agent_type.value,
+                action=action_req.action,
+                target=action_req.target,
+                parameters=action_req.parameters,
+                risk_level=action_req.risk_level.value,
+                confidence=decision.confidence,
+                status=ActionStatus.PENDING_APPROVAL,
+            )
+            action.set_expiry(hours=72)
+            self._pending_actions.append(action)
+
+    # ──────────────────────────────────────────────────────
+    # ACCESSORS
+    # ──────────────────────────────────────────────────────
+
+    @property
+    def last_decision(self) -> Decision | None:
+        return self._decisions[-1] if self._decisions else None
+
+    @property
+    def pending_actions(self) -> list[Action]:
+        return [
+            a for a in self._pending_actions
+            if a.status == ActionStatus.PENDING_APPROVAL and not a.is_expired
+        ]
+
+    @property
+    def logs(self) -> list[ActionLog]:
+        return list(self._logs)
+
+    @property
+    def stats(self) -> dict[str, Any]:
+        return {
+            "agent": self.agent_type.value,
+            "total_decisions": len(self._decisions),
+            "total_logs": len(self._logs),
+            "pending_actions": len(self.pending_actions),
+            "avg_confidence": (
+                sum(d.confidence for d in self._decisions) / len(self._decisions)
+                if self._decisions else 0
+            ),
+      }
