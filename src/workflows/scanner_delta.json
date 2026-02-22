@@ -1,0 +1,77 @@
+{
+  "name": "Kuria — Scanner Delta (Every 3 Days)",
+  "description": "Lance le scan delta tous les 3 jours pour chaque client actif",
+  "trigger": "cron",
+  "active": true,
+  "nodes": [
+    {
+      "name": "CRON Every 3 Days",
+      "type": "n8n-nodes-base.cron",
+      "position": [200, 300],
+      "parameters": {
+        "triggerTimes": {
+          "item": [
+            {
+              "mode": "custom",
+              "cronExpression": "0 6 */3 * *"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "Get Active Companies",
+      "type": "n8n-nodes-base.supabase",
+      "position": [400, 300],
+      "parameters": {
+        "operation": "getAll",
+        "table": "companies",
+        "filters": {
+          "is_active": true
+        }
+      },
+      "credentials": {
+        "supabaseApi": "kuria_supabase"
+      }
+    },
+    {
+      "name": "For Each Company",
+      "type": "n8n-nodes-base.splitInBatches",
+      "position": [600, 300],
+      "parameters": {
+        "batchSize": 1
+      }
+    },
+    {
+      "name": "Trigger Delta Scan",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [800, 300],
+      "parameters": {
+        "method": "POST",
+        "url": "={{$env.KURIA_API_URL}}/api/scan/delta",
+        "headers": {
+          "x-api-key": "={{$env.KURIA_API_KEY}}",
+          "Content-Type": "application/json"
+        },
+        "body": "{\"company_id\": \"={{$json.id}}\"}"
+      }
+    },
+    {
+      "name": "Log Result",
+      "type": "n8n-nodes-base.supabase",
+      "position": [1000, 300],
+      "parameters": {
+        "operation": "insert",
+        "table": "action_logs",
+        "columns": "company_id,agent_type,event_type,description,success",
+        "additionalFields": {
+          "company_id": "={{$json.id}}",
+          "agent_type": "scanner",
+          "event_type": "workflow.scanner_delta",
+          "description": "Delta scan triggered by n8n",
+          "success": true
+        }
+      }
+    }
+  ]
+      }
