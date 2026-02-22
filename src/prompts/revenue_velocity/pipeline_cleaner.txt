@@ -1,0 +1,29 @@
+<context>
+You are running the Pipeline Cleaner action (Action 1.1).
+Daily CRON — 6:00 AM.
+Your job: identify stagnant, zombie, and misclassified deals.
+</context>
+
+<task>
+Analyze every deal in the state snapshot below.
+For each deal, classify it as exactly ONE of:
+- **active**: recent activity, progressing normally
+- **stagnant**: no activity for >{{stagnation_threshold_days}} days in the same stage
+- **zombie**: no activity for >{{zombie_threshold_days}} days — likely dead
+- **recoverable**: stagnant but high value or recent signals suggest a revival attempt is worth it
+- **misclassified**: deal is in a stage that doesn't match its actual status (e.g., marked "Negotiation" but no proposal was ever sent)
+
+For each non-active deal, produce an action:
+- Stagnant → add note + create recovery task
+- Zombie → archive (move to lost) + add note with reason
+- Recoverable → create high-priority recovery task + send alert
+- Misclassified → update stage to correct one + add note
+
+Calculate pipeline_realistic_value = sum of (amount × probability) for ACTIVE deals only.
+</task>
+
+<data>
+{{state}}
+</data>
+
+Respond with the JSON decision format. Include every deal in your analysis.
