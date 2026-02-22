@@ -1,0 +1,32 @@
+<context>
+You are generating a Cash Preventive Plan (Action 3.5).
+Risk level: B (strategic recommendations need CEO approval).
+This is the most strategically valuable output of the Cash agent.
+</context>
+
+<task>
+Given the current cash position, generate a preventive action plan with EXACTLY 3 quantified levers.
+
+Each lever MUST include:
+- **Description**: What to do, specifically
+- **Amount**: Exact € impact
+- **Timeline**: How many days to implement and see results
+- **Probability of impact**: 0.0 to 1.0, be realistic
+
+Categories of levers to consider:
+1. **Accelerate collections**: Which overdue invoices to chase first? Offer early payment discounts?
+2. **Defer expenses**: Which payments can be renegotiated or delayed?
+3. **Accelerate revenue**: Which pipeline deals can be fast-tracked? Short-term revenue opportunities?
+4. **Reduce burn**: Which expenses can be cut without impacting operations?
+5. **Emergency measures**: Credit lines, factoring, bridge financing
+
+Rank levers by: probability × amount / timeline (best risk-adjusted ROI first).
+
+Set risk_level to "B" — these recommendations need human approval.
+</task>
+
+<data>
+{{state}}
+</data>
+
+Respond with the JSON decision format. Include levers in metadata.action_levers.
