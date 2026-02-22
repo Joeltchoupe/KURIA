@@ -1,49 +1,32 @@
 """
-KURIA Models — Schémas de données validés (Pydantic v2)
+KURIA Models — LLM-First Architecture.
 
-Chaque modèle est la SOURCE DE VÉRITÉ pour sa structure.
-Aucun dict libre ne traverse le système.
-Si une donnée existe, elle a un modèle.
+5 modèles universels :
+  Event       → événement brut entrant
+  State       → état compressé envoyé au LLM
+  Decision    → sortie JSON du LLM
+  Action      → action à exécuter
+  ActionLog   → trace de ce qui a été fait
+
++ modèles de config (inchangés)
++ modèles business légers
 """
 
-from models.company import (
-    CompanyProfile,
-    CompanySize,
-    GrowthStage,
-    ToolConnection,
-    ToolProvider,
-    ConnectedTools,
+from models.event import Event, EventType
+from models.state import (
+    StateSnapshot,
+    DealState,
+    TaskState,
+    CashState,
+    MarketingState,
 )
-from models.data_portrait import (
-    DataPortrait,
-    SalesAnalysis,
-    OperationsAnalysis,
-    FinanceAnalysis,
-    MarketingAnalysis,
-    Anomaly,
-    AnomalyType,
-)
-from models.friction import (
-    Friction,
-    FrictionMap,
-    FrictionSeverity,
-    PriorityQuadrant,
-)
-from models.clarity_score import (
-    ClarityScore,
-    DepartmentScores,
-)
-from models.events import (
-    Event,
-    EventType,
-    EventPriority,
-)
+from models.decision import Decision, DecisionType, RiskLevel
+from models.action import Action, ActionStatus, ActionLog
+from models.company import CompanyProfile, CompanySize, GrowthStage
 from models.agent_config import (
-    # Générique (consommé par les agents)
     AgentType,
     Threshold,
     AgentConfig,
-    # Typé fort (utilisé par l'orchestrateur)
     BaseAgentConfig,
     ScoreWeights,
     RevenueVelocityConfig,
@@ -52,54 +35,30 @@ from models.agent_config import (
     AcquisitionEfficiencyConfig,
     AgentConfigSet,
 )
-from models.metrics import (
-    AgentMetrics,
-    RevenueVelocityMetrics,
-    ProcessClarityMetrics,
-    CashPredictabilityMetrics,
-    AcquisitionEfficiencyMetrics,
-    MetricTrend,
-)
-from models.report import (
-    ReportSection,
-    WeeklyReport,
-    AttentionItem,
-    AttentionLevel,
-)
 
 __all__ = [
+    # Core — Universal
+    "Event",
+    "EventType",
+    "StateSnapshot",
+    "DealState",
+    "TaskState",
+    "CashState",
+    "MarketingState",
+    "Decision",
+    "DecisionType",
+    "RiskLevel",
+    "Action",
+    "ActionStatus",
+    "ActionLog",
     # Company
     "CompanyProfile",
     "CompanySize",
     "GrowthStage",
-    "ToolConnection",
-    "ToolProvider",
-    "ConnectedTools",
-    # Data Portrait
-    "DataPortrait",
-    "SalesAnalysis",
-    "OperationsAnalysis",
-    "FinanceAnalysis",
-    "MarketingAnalysis",
-    "Anomaly",
-    "AnomalyType",
-    # Friction
-    "Friction",
-    "FrictionMap",
-    "FrictionSeverity",
-    "PriorityQuadrant",
-    # Clarity Score
-    "ClarityScore",
-    "DepartmentScores",
-    # Events
-    "Event",
-    "EventType",
-    "EventPriority",
-    # Agent Config — Générique
+    # Agent Config
     "AgentType",
     "Threshold",
     "AgentConfig",
-    # Agent Config — Typé fort
     "BaseAgentConfig",
     "ScoreWeights",
     "RevenueVelocityConfig",
@@ -107,16 +66,4 @@ __all__ = [
     "CashPredictabilityConfig",
     "AcquisitionEfficiencyConfig",
     "AgentConfigSet",
-    # Metrics
-    "AgentMetrics",
-    "RevenueVelocityMetrics",
-    "ProcessClarityMetrics",
-    "CashPredictabilityMetrics",
-    "AcquisitionEfficiencyMetrics",
-    "MetricTrend",
-    # Report
-    "ReportSection",
-    "WeeklyReport",
-    "AttentionItem",
-    "AttentionLevel",
 ]
