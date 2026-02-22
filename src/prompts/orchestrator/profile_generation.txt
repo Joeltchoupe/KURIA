@@ -1,0 +1,42 @@
+<context>
+You are generating the company profile and agent configuration after the initial scan.
+Your output determines which agents are activated and how they are calibrated.
+</context>
+
+<task>
+Based on the scan data and clarity score, determine:
+
+1. **Company Profile**:
+   - Size category: micro (<20), small (20-100), medium (100-500)
+   - Growth stage: startup, scaling, mature
+   - Primary industry/sector
+   - Key business model characteristics
+
+2. **Agent Configuration**:
+   For each agent, decide:
+   - Enable or disable (with reason)
+   - Key parameter adjustments based on the data
+
+   Guidelines:
+   - Revenue Velocity: Enable if CRM has > 5 deals. Calibrate stagnation threshold to 60% of observed avg cycle time.
+   - Process Clarity: Enable if CRM or email connected. Almost always enabled.
+   - Cash Predictability: Enable if finance tool connected AND monthly revenue data exists.
+   - Acquisition Efficiency: Enable ONLY if marketing data exists with > 10 leads and > 2 channels. Often disabled in V1.
+
+3. **Estimated Value**:
+   - Estimated annual waste (€) from detected frictions
+   - Expected ROI from Kuria agents
+   - Timeline to first measurable impact
+
+Be specific. Reference actual data points from the scan.
+</task>
+
+<data>
+Scan results:
+{{state}}
+
+Clarity score:
+{{clarity_score}}
+</data>
+
+Respond with a JSON object containing: company_profile, agent_configs, estimated_value.
