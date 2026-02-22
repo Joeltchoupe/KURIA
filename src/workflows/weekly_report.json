@@ -1,0 +1,93 @@
+{
+  "name": "Kuria — Weekly Report (Monday 7AM)",
+  "description": "Génère et envoie le rapport hebdomadaire à chaque CEO",
+  "trigger": "cron",
+  "active": true,
+  "nodes": [
+    {
+      "name": "CRON Monday 7AM",
+      "type": "n8n-nodes-base.cron",
+      "position": [200, 300],
+      "parameters": {
+        "triggerTimes": {
+          "item": [
+            {
+              "mode": "custom",
+              "cronExpression": "0 7 * * 1"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "Get Active Companies",
+      "type": "n8n-nodes-base.supabase",
+      "position": [400, 300],
+      "parameters": {
+        "operation": "getAll",
+        "table": "companies",
+        "filters": {
+          "is_active": true
+        }
+      }
+    },
+    {
+      "name": "For Each Company",
+      "type": "n8n-nodes-base.splitInBatches",
+      "position": [600, 300],
+      "parameters": {
+        "batchSize": 1
+      }
+    },
+    {
+      "name": "Run Weekly Cycle",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [800, 300],
+      "parameters": {
+        "method": "POST",
+        "url": "={{$env.KURIA_API_URL}}/api/orchestrator/run-weekly",
+        "headers": {
+          "x-api-key": "={{$env.KURIA_API_KEY}}",
+          "Content-Type": "application/json"
+        },
+        "body": "{\"company_id\": \"={{$json.id}}\"}",
+        "timeout": 180000
+      }
+    },
+    {
+      "name": "Get Report",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [1000, 300],
+      "parameters": {
+        "method": "GET",
+        "url": "={{$env.KURIA_API_URL}}/api/reports/latest/={{$json.id}}",
+        "headers": {
+          "x-api-key": "={{$env.KURIA_API_KEY}}"
+        }
+      }
+    },
+    {
+      "name": "Send Email Report",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [1200, 300],
+      "parameters": {
+        "method": "POST",
+        "url": "={{$env.KURIA_API_URL}}/api/notifications/send-report",
+        "headers": {
+          "x-api-key": "={{$env.KURIA_API_KEY}}",
+          "Content-Type": "application/json"
+        },
+        "body": "{\"company_id\": \"={{$json.company_id}}\", \"report_id\": \"={{$json.id}}\"}"
+      }
+    },
+    {
+      "name": "Slack Summary",
+      "type": "n8n-nodes-base.slack",
+      "position": [1200, 450],
+      "parameters": {
+        "channel": "#kuria-reports",
+        "text": "📊 Weekly report sent for {{$json.company_name}} — Clarity {{$json.clarity_score}}/100"
+      }
+    }
+  ]
+      }
