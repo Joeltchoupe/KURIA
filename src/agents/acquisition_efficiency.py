@@ -9,6 +9,9 @@ Actions :
   4.x — Channel Analysis [A]
 
 Souvent DÉSACTIVÉ en V1 si données insuffisantes.
+
+System prompt : prompts/system/acquisition_efficiency.txt
+User prompts : prompts/acquisition_efficiency/*.txt
 """
 
 from __future__ import annotations
@@ -28,69 +31,45 @@ class AcquisitionEfficiencyAgent(BaseAgent):
 
     Attribution = déterministe (first/last/linear).
     Analyse qualitative + budget reallocation = LLM.
+    Budget changes = toujours Risk B (validation humaine).
     """
 
     @property
     def agent_type(self) -> AgentType:
         return AgentType.ACQUISITION_EFFICIENCY
 
-    @property
-    def system_prompt(self) -> str:
-        return """You are a world-class Growth/Marketing AI.
-
-Your job is to optimize customer acquisition: find the best channels, reduce CAC, improve lead quality.
-
-You receive marketing channel data with: spend, leads, clients, CAC, conversion rates, trends.
-
-You MUST respond with a JSON object containing:
-{
-  "decision_type": "analyze_channels" | "reallocate_budget" | "score_lead_quality" | "recommend",
-  "confidence": 0.0-1.0,
-  "reasoning": "your analysis in 2-3 sentences",
-  "risk_level": "A" | "B" | "C",
-  "actions": [
-    {
-      "action": "send_alert" | "create_report" | "adjust_budget" | "pause_channel" | "scale_channel",
-      "target": "channel_name",
-      "parameters": {...},
-      "risk_level": "B",
-      "priority": 1-10
-    }
-  ],
-  "metadata": {
-    "channels_analyzed": 0,
-    "blended_cac": 0.0,
-    "best_channel": "...",
-    "worst_channel": "...",
-    "ltv_cac_ratio": 0.0,
-    "budget_recommendations": {
-      "cut": [{"channel": "...", "current_spend": 0, "recommended_spend": 0, "reason": "..."}],
-      "maintain": [...],
-      "double": [...]
-    }
-  }
-}
-
-RULES:
-- Budget changes are ALWAYS risk_level "B" (needs human approval).
-- Pausing a channel is risk_level "B".
-- Analysis and alerts are risk_level "A".
-- Minimum 5 leads per channel to score it.
-- Minimum 10 total clients to produce reliable analysis.
-- Always compare CAC to LTV. A high CAC is fine if LTV is higher.
-- Detect trends: a channel degrading 3 months in a row is a red flag.
-"""
+    def _custom_prompt_variables(self) -> dict[str, Any]:
+        """Variables spécifiques injectées dans les prompts Acquisition."""
+        params = self.config.parameters
+        return {
+            "attribution_model": params.get("attribution_model", "positional"),
+            "cac_anomaly_threshold_pct": params.get(
+                "cac_anomaly_threshold_pct", 0.25
+            ),
+            "min_leads_per_channel": params.get("min_leads_per_channel", 5),
+            "min_clients_for_analysis": params.get(
+                "min_clients_for_analysis", 10
+            ),
+            "first_touch_weight": params.get("first_touch_weight", 0.3),
+            "last_touch_weight": params.get("last_touch_weight", 0.3),
+        }
 
     async def build_snapshot(
         self,
         events: list[Event] | None = None,
         raw_data: dict[str, Any] | None = None,
     ) -> StateSnapshot:
-        """Construit le snapshot marketing."""
+        """
+        Construit le snapshot marketing.
+
+        Les calculs déterministes (blended CAC, LTV/CAC ratio)
+        sont faits ICI, pas par le LLM.
+        """
         marketing = None
 
         if raw_data and "channels" in raw_data:
-            channels = []
+            channels: list[ChannelState] = []
+
             for ch in raw_data["channels"]:
                 channels.append(ChannelState(
                     channel=ch.get("channel", ""),
@@ -106,16 +85,34 @@ RULES:
             total_spend = sum(ch.spend_30d for ch in channels)
             total_leads = sum(ch.leads_30d for ch in channels)
             total_clients = sum(ch.clients_30d for ch in channels)
-            blended_cac = total_spend / max(total_clients, 1)
+            blended_cac = (
+                round(total_spend / total_clients, 2)
+                if total_clients > 0
+                else 0
+            )
             avg_ltv = raw_data.get("avg_ltv", 0)
+            ltv_cac_ratio = (
+                round(avg_ltv / blended_cac, 2)
+                if blended_cac > 0
+                else 0
+            )
+
+            # Calculer CAC par channel si non fourni
+            for ch in channels:
+                if ch.cac == 0 and ch.clients_30d > 0:
+                    ch.cac = round(ch.spend_30d / ch.clients_30d, 2)
+                if ch.conversion_rate == 0 and ch.leads_30d > 0:
+                    ch.conversion_rate = round(
+                        ch.clients_30d / ch.leads_30d, 4
+                    )
 
             marketing = MarketingState(
                 channels=channels,
                 total_leads_30d=total_leads,
                 total_spend_30d=total_spend,
-                blended_cac=round(blended_cac, 2),
+                blended_cac=blended_cac,
                 avg_ltv=avg_ltv,
-                ltv_cac_ratio=round(avg_ltv / max(blended_cac, 1), 2),
+                ltv_cac_ratio=ltv_cac_ratio,
             )
 
         recent = []
@@ -138,19 +135,50 @@ RULES:
         )
 
     def validate_decision(self, decision: Decision) -> list[str]:
-        """Valide les règles métier Acquisition."""
+        """
+        Valide les règles métier Acquisition.
+
+        Règles :
+          - Budget changes = TOUJOURS Risk B
+          - Pas de modification pub directe
+          - Données suffisantes requises
+        """
         errors: list[str] = []
-        min_clients = self.config.parameters.get("min_clients_for_analysis", 10)
 
         for action in decision.actions:
             # Budget = TOUJOURS approval humaine
-            if action.action in ("adjust_budget", "pause_channel", "scale_channel"):
+            if action.action in (
+                "adjust_budget",
+                "pause_channel",
+                "scale_channel",
+            ):
                 if action.risk_level != RiskLevel.B:
-                    action.risk_level = RiskLevel.B  # Force B
+                    # Force B plutôt que bloquer
+                    action.risk_level = RiskLevel.B
 
             # Pas d'exécution pub directe
-            if action.action in ("create_ad", "modify_ad", "delete_ad"):
-                errors.append("INTERDIT : modification pub directe")
+            if action.action in (
+                "create_ad",
+                "modify_ad",
+                "delete_ad",
+                "create_campaign",
+                "delete_campaign",
+            ):
+                errors.append(
+                    f"INTERDIT : modification pub directe '{action.action}'"
+                )
+
+            # Budget négatif
+            if action.action == "adjust_budget":
+                adjustments = action.parameters.get("adjustments", [])
+                for adj in adjustments:
+                    if isinstance(adj, dict):
+                        rec = adj.get("recommended_spend", 0)
+                        if rec < 0:
+                            errors.append(
+                                f"Budget négatif recommandé pour "
+                                f"'{adj.get('channel', '?')}' : {rec}"
+                            )
 
         return errors
 
@@ -158,23 +186,69 @@ RULES:
         return DecisionType.ANALYZE_CHANNELS
 
     # ──────────────────────────────────────────────────────
-    # CONVENIENCE
+    # CONVENIENCE METHODS — Raccourcis par action
     # ──────────────────────────────────────────────────────
 
     async def analyze_channels(
-        self, channels_data: list[dict[str, Any]], avg_ltv: float = 0
+        self,
+        channels_data: list[dict[str, Any]],
+        avg_ltv: float = 0,
     ) -> Decision:
-        """Action 4.x — Channel Analysis [A]."""
+        """
+        Action 4.x — Channel Analysis [A].
+
+        Analyse chaque canal : CAC, LTV/CAC, trend.
+        Verdict par canal : SCALE / MAINTAIN / MONITOR / CUT.
+        """
         return await self.run(
-            raw_data={"channels": channels_data, "avg_ltv": avg_ltv},
+            raw_data={
+                "channels": channels_data,
+                "avg_ltv": avg_ltv,
+            },
             prompt_name="acquisition_efficiency/channel_analysis",
         )
 
     async def reallocate_budget(
-        self, channels_data: list[dict[str, Any]], avg_ltv: float = 0
+        self,
+        channels_data: list[dict[str, Any]],
+        avg_ltv: float = 0,
+        total_budget: float | None = None,
     ) -> Decision:
-        """Action 4.3 — Budget Reallocation [B]."""
+        """
+        Action 4.3 — Budget Reallocation [B].
+
+        Risk B : toute recommandation budget nécessite validation humaine.
+        Catégorise en CUT / MAINTAIN / DOUBLE.
+        """
+        total = total_budget or sum(
+            ch.get("spend_30d", 0) for ch in channels_data
+        )
+
         return await self.run(
-            raw_data={"channels": channels_data, "avg_ltv": avg_ltv},
+            raw_data={
+                "channels": channels_data,
+                "avg_ltv": avg_ltv,
+                "total_budget": total,
+            },
             prompt_name="acquisition_efficiency/budget_reallocation",
-                )
+        )
+
+    async def score_lead_quality(
+        self,
+        leads_data: list[dict[str, Any]],
+        channels_data: list[dict[str, Any]],
+    ) -> Decision:
+        """
+        Score la qualité des leads par canal.
+
+        Pas de prompt dédié — utilise le channel_analysis
+        avec un focus lead quality.
+        """
+        return await self.run(
+            raw_data={
+                "channels": channels_data,
+                "leads": leads_data,
+            },
+            prompt_name="acquisition_efficiency/channel_analysis",
+            prompt_variables={"focus": "lead_quality"},
+  )
