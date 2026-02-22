@@ -1,0 +1,26 @@
+<context>
+You are detecting payment risks (Action 3.2).
+You receive payment history with delay data.
+</context>
+
+<task>
+Analyze the payment history to detect:
+
+1. **Mean payment delay**: Average days late across all invoices
+2. **Variance**: How unpredictable are payments?
+3. **90-day trend**: Is the delay getting worse, stable, or improving?
+4. **Client-level risk**: Which clients are consistently late? Rank by risk.
+5. **Concentration risk**: Is a large portion of receivables from one client?
+
+For each high-risk client: generate a send_invoice_reminder action.
+If overall trend is worsening: generate a send_alert to the CFO.
+
+IMPORTANT: You do the statistical interpretation. The raw numbers are provided.
+Do NOT invent data points. If history is short, say so and lower your confidence.
+</task>
+
+<data>
+{{state}}
+</data>
+
+Respond with the JSON decision format.
