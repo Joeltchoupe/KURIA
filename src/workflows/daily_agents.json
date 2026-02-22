@@ -1,0 +1,85 @@
+{
+  "name": "Kuria — Daily Agents (RV + PC + Cash)",
+  "description": "Exécute les agents quotidiens : Revenue Velocity, Process Clarity, Cash Predictability",
+  "trigger": "cron",
+  "active": true,
+  "nodes": [
+    {
+      "name": "CRON Daily 6AM",
+      "type": "n8n-nodes-base.cron",
+      "position": [200, 300],
+      "parameters": {
+        "triggerTimes": {
+          "item": [
+            {
+              "mode": "custom",
+              "cronExpression": "0 6 * * *"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "Get Active Companies",
+      "type": "n8n-nodes-base.supabase",
+      "position": [400, 300],
+      "parameters": {
+        "operation": "getAll",
+        "table": "companies",
+        "filters": {
+          "is_active": true
+        }
+      }
+    },
+    {
+      "name": "For Each Company",
+      "type": "n8n-nodes-base.splitInBatches",
+      "position": [600, 300],
+      "parameters": {
+        "batchSize": 1
+      }
+    },
+    {
+      "name": "Run Daily Cycle",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [800, 300],
+      "parameters": {
+        "method": "POST",
+        "url": "={{$env.KURIA_API_URL}}/api/orchestrator/run-daily",
+        "headers": {
+          "x-api-key": "={{$env.KURIA_API_KEY}}",
+          "Content-Type": "application/json"
+        },
+        "body": "{\"company_id\": \"={{$json.id}}\"}",
+        "timeout": 120000
+      }
+    },
+    {
+      "name": "Check for Failures",
+      "type": "n8n-nodes-base.if",
+      "position": [1000, 300],
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{$json.all_success}}",
+              "value2": false
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "Alert on Failure",
+      "type": "n8n-nodes-base.slack",
+      "position": [1200, 200],
+      "parameters": {
+        "channel": "#kuria-ops",
+        "text": "🔴 Daily agent run failed for company {{$json.company_id}}. Check logs."
+      },
+      "credentials": {
+        "slackApi": "kuria_slack"
+      }
+    }
+  ]
+    }
