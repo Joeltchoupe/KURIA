@@ -1,15 +1,14 @@
 """
 KURIA Models — LLM-First Architecture.
 
-5 modèles universels :
-  Event       → événement brut entrant
-  State       → état compressé envoyé au LLM
-  Decision    → sortie JSON du LLM
-  Action      → action à exécuter
-  ActionLog   → trace de ce qui a été fait
+Core (universel) :
+  Event, StateSnapshot, Decision, Action, ActionLog
 
-+ modèles de config (inchangés)
-+ modèles business légers
+Business :
+  CompanyProfile, ClarityScore, WeeklyReport
+
+Config :
+  AgentConfig, Threshold, *Config, AgentConfigSet
 """
 
 from models.event import Event, EventType
@@ -19,10 +18,25 @@ from models.state import (
     TaskState,
     CashState,
     MarketingState,
+    ChannelState,
 )
-from models.decision import Decision, DecisionType, RiskLevel
+from models.decision import (
+    Decision,
+    DecisionType,
+    RiskLevel,
+    ActionRequest,
+)
 from models.action import Action, ActionStatus, ActionLog
 from models.company import CompanyProfile, CompanySize, GrowthStage
+from models.clarity_score import ClarityScore
+from models.report import (
+    WeeklyReport,
+    KPIStatus,
+    DecisionSummary,
+    PendingApproval,
+    AdaptationNote,
+    AttentionLevel,
+)
 from models.agent_config import (
     AgentType,
     Threshold,
@@ -37,7 +51,7 @@ from models.agent_config import (
 )
 
 __all__ = [
-    # Core — Universal
+    # Core
     "Event",
     "EventType",
     "StateSnapshot",
@@ -45,16 +59,25 @@ __all__ = [
     "TaskState",
     "CashState",
     "MarketingState",
+    "ChannelState",
     "Decision",
     "DecisionType",
     "RiskLevel",
+    "ActionRequest",
     "Action",
     "ActionStatus",
     "ActionLog",
-    # Company
+    # Business
     "CompanyProfile",
     "CompanySize",
     "GrowthStage",
+    "ClarityScore",
+    "WeeklyReport",
+    "KPIStatus",
+    "DecisionSummary",
+    "PendingApproval",
+    "AdaptationNote",
+    "AttentionLevel",
     # Agent Config
     "AgentType",
     "Threshold",
