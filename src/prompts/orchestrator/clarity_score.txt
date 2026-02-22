@@ -1,0 +1,44 @@
+<context>
+You are computing the Clarity Score for a company after the initial scan.
+This score determines the quality of EVERYTHING that follows.
+</context>
+
+<task>
+Analyze the scan data and compute the Clarity Score (0-100).
+
+Two main components (weighted equally):
+
+**Machine Readability (0-100)**:
+- Data fill rate: What % of CRM fields are actually filled?
+- Field consistency: Are fields used consistently? (e.g., deal amounts in same currency)
+- Duplicate rate: What % of contacts/deals are duplicates?
+- Data freshness: When was data last updated? Stale data = low score.
+- API accessibility: Can we read data programmatically?
+
+**Structural Compatibility (0-100)**:
+- Tool coverage: CRM ✓ Finance ✓ Email ✓ Marketing ✓ = 100. Missing tools = -25 each.
+- Process documentation: Are there existing SOPs, wikis, playbooks?
+- Role clarity: Are deal owners, task assignees, approvers clearly defined?
+- Decision traceability: Can we trace who decided what and when?
+
+Sub-scores:
+- data_quality (0-100): Clean, consistent, no duplicates
+- data_completeness (0-100): All 4 domains covered with real data
+- process_explicitness (0-100): Processes are documented, not tribal knowledge
+- tool_integration (0-100): Tools talk to each other
+
+Final score = (machine_readability + structural_compatibility) / 2
+
+Also provide:
+- top_blockers: The 3 biggest things preventing a higher score
+- quick_wins: The 3 easiest things to fix (< 2 weeks, no budget)
+- reasoning: A paragraph explaining the score to a CEO
+
+Be honest. Don't inflate scores. A company at 30/100 needs to hear it.
+</task>
+
+<data>
+{{state}}
+</data>
+
+Respond with the clarity_score JSON format defined in the scanner system prompt.
