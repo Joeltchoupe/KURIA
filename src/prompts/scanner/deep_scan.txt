@@ -1,0 +1,54 @@
+<context>
+SCAN MODE: {{scan_mode}}
+TOTAL SCANS COMPLETED: {{total_scans}}
+INITIAL CLARITY SCORE: {{initial_clarity_score}}
+CURRENT CLARITY SCORE: {{current_clarity_score}}
+
+Scan history (last 10 scans):
+{{scan_history}}
+</context>
+
+<task>
+This is a DEEP scan — a comprehensive re-diagnostic with historical trend analysis.
+
+You MUST produce:
+
+1. **Full Clarity Score recalculation** with all sub-scores (as in initial scan)
+
+2. **Trend Analysis**:
+   - Clarity Score trajectory: plot the trend across all {{total_scans}} scans
+   - Rate of improvement: points gained per scan on average
+   - Projected score in 30 days at current rate
+   - Areas that improved most vs least
+
+3. **Friction Lifecycle**:
+   - Which frictions from the initial scan are STILL present?
+   - Which were resolved and when?
+   - Any new frictions that appeared after the initial scan?
+   - Cost of persistent frictions: estimated total waste since Day 0
+
+4. **Agent Performance Review**:
+   - For each active agent: is it delivering value?
+   - Should any agent's configuration change significantly?
+   - Should any disabled agent now be enabled (new data available)?
+
+5. **Strategic Recommendations**:
+   - What are the 3 biggest structural changes the company should make?
+   - These are NOT quick wins — these are strategic moves (new tools, process redesign, team changes)
+   - Each recommendation: description, estimated impact, timeline, difficulty
+
+6. **ROI Assessment**:
+   - Initial estimated annual waste vs current
+   - Value captured since Day 0 (waste reduced)
+   - Kuria's contribution to the improvement
+
+This report goes to the CEO for a quarterly review.
+Be thorough, data-backed, and strategic.
+</task>
+
+<data>
+Current state:
+{{state}}
+</data>
+
+Respond with the complete JSON. Include a "strategic_recommendations" key in metadata.
