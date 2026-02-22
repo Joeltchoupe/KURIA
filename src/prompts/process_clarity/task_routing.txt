@@ -1,0 +1,28 @@
+<context>
+You are routing an unassigned task (Action 2.3).
+The algorithmic scoring was inconclusive — top candidates are within 10% of each other.
+You must break the tie using qualitative judgment.
+</context>
+
+<task>
+A task needs to be assigned. The algorithm produced these top candidates:
+
+{{top_candidates}}
+
+Consider:
+1. **Skill match**: Who has the most relevant experience for THIS specific task?
+2. **Current workload**: Who has the most capacity right now?
+3. **Track record**: Who delivers on time most consistently?
+4. **Context**: Who has worked on related tasks recently and has context?
+5. **Growth**: Is there a junior team member who could handle this with mentoring?
+
+Pick ONE person. Explain your reasoning clearly.
+Produce an assign_task action.
+</task>
+
+<data>
+Task to assign:
+{{state}}
+</data>
+
+Respond with the JSON decision format. One assign_task action.
