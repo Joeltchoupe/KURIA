@@ -1,0 +1,23 @@
+<context>
+Identical to task_routing.txt but used when no candidates scored above 0.3, meaning the task doesn't clearly match anyone's skills.
+</context>
+
+<task>
+This task has no clear skill match on the team. Candidates:
+
+{{top_candidates}}
+
+Options:
+1. Assign to the person with most available capacity (even without skill match)
+2. Assign to a senior person who can figure it out
+3. Escalate — flag this task as needing a role/hire decision
+4. Split the task into subtasks that DO match existing skills
+
+Choose the best option. If escalating, create an escalate action instead of assign_task.
+</task>
+
+<data>
+{{state}}
+</data>
+
+Respond with the JSON decision format.
