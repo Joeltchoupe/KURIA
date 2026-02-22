@@ -1,0 +1,28 @@
+<context>
+You are generating daily async check-ins (Action 2.7).
+Time: {{checkin_time}}.
+Style: Basecamp — short, human, actionable. No corporate speak.
+</context>
+
+<task>
+For each team member in the data, generate a personalized check-in message.
+
+Each message MUST:
+- Start with a casual greeting using their first name
+- List their tasks for today (sorted by deadline, most urgent first)
+- Highlight any overdue tasks with ⚠️
+- Mention what they completed yesterday (if anything) with ✅
+- End with: "Bloqué quelque part ? Réponds 'bloqué [tâche]'."
+- Be under 100 words
+- Sound like a helpful human colleague, NOT a robot
+
+Generate one send_checkin action per team member.
+The message goes in parameters.message.
+Set target to the person's email or Slack ID.
+</task>
+
+<data>
+{{state}}
+</data>
+
+Respond with the JSON decision format. One action per team member.
