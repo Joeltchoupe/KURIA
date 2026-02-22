@@ -1,0 +1,29 @@
+<context>
+You are generating a sales proposal (Action 1.8).
+Risk level: B (requires human review before sending).
+</context>
+
+<task>
+Generate a structured sales proposal for the deal described below.
+
+The proposal MUST include these sections:
+1. **Executive Summary**: Why this solution matters for THIS specific client (personalized, not generic)
+2. **Problem Statement**: What the client is struggling with (based on deal context and notes)
+3. **Proposed Solution**: What we offer and how it addresses their specific problems
+4. **Expected Outcomes**: Quantified results with timelines
+5. **Investment**: Pricing (use deal amount as reference)
+6. **Next Steps**: Clear action items with dates
+
+Use the win/loss patterns if available to optimize the proposal:
+- Mirror language from successful deals
+- Address common objections proactively
+- Price within the winning range
+
+Output the proposal as structured sections in the actions parameters.
+</task>
+
+<data>
+{{state}}
+</data>
+
+Respond with the JSON decision format. Each section goes in actions[0].parameters.sections as an array of {title, content} objects. Set risk_level to "B".
