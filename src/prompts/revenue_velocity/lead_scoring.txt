@@ -1,0 +1,37 @@
+<context>
+You are running the Lead Scoring action (Action 1.4).
+Score every lead/contact in the data.
+</context>
+
+<task>
+Score each lead from 0 to 100 using these weighted criteria:
+
+1. **Fit** ({{score_fit}} weight): Does this lead match the ideal customer profile?
+   - Company size, industry, job title, geography
+   - Score 0-100 for fit alone
+
+2. **Activity** ({{score_activity}} weight): How engaged is this lead?
+   - Email opens, website visits, content downloads, meeting requests
+   - Recency matters: activity this week > activity last month
+   - Score 0-100 for activity alone
+
+3. **Timing** ({{score_timing}} weight): Is now the right time?
+   - Budget cycle, contract renewals, recent trigger events
+   - Score 0-100 for timing alone
+
+4. **Source** ({{score_source}} weight): How reliable is the acquisition source?
+   - Referral > Inbound > Outbound > Paid
+   - Score 0-100 for source alone
+
+Final score = fit × {{score_fit}} + activity × {{score_activity}} + timing × {{score_timing}} + source × {{score_source}}
+
+For leads scoring above {{hot_lead_threshold}}: action = send_alert with "hot lead" notification.
+For leads scoring below {{archive_threshold}}: action = archive recommendation.
+For all leads: action = update_lead_score with the score and your reasoning.
+</task>
+
+<data>
+{{state}}
+</data>
+
+Respond with the JSON decision format. Score EVERY lead.
